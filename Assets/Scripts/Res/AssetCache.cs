@@ -25,6 +25,12 @@ public abstract class AssetCache
 		OnUnLoad ();
 	}
 
+	public void UnUsed()
+	{
+		RemoveAllObj();
+		OnUnUsed();
+	}
+
 	public int RefCount
 	{
 		get {
@@ -533,7 +539,7 @@ public class AssetCacheManager: Singleton<AssetCacheManager>
 				// node.value不会为null
 				if (node.Value != null)
 				{
-					if (timer - node.Value.LastUsedTime >= cCacheUnUsedTime)
+					if (timer - node.Value.LastUsedTime >= cCacheUnUsedTime && node.Value.IsNotUsed())
 					{
 						// 删除资源
 						delNode = node;
@@ -644,17 +650,56 @@ public class AssetCacheManager: Singleton<AssetCacheManager>
 		mTempAssetList.AddLast(cache);
 	}
 
+	// 资源更新清理
+	public void AutoUpdateClear()
+	{
+		LinkedListNode<AssetCache> first = mTempAssetList.First;
+		while (first != null)
+		{
+			if (first.Value != null)
+				first.Value.UnUsed();
+			first = first.Next;
+		}
+		mTempAssetList.Clear();
+
+		first = mNotUsedCacheList.First;
+		while (first != null)
+		{
+			if (first.Value != null)
+				first.Value.UnUsed();
+			first = first.Next;
+		}
+		mNotUsedCacheList.Clear();
+
+		first = mUsedCacheList.First;
+		while (first != null)
+		{
+			if (first.Value != null)
+				first.Value.UnUsed();
+			first = first.Next;
+		}
+		mUsedCacheList.Clear();
+
+		mObjCacheMap.Clear();
+		mInstObjToObjMap.Clear();
+		mCacheSet.Clear();
+	}
+
 	private void UnLoadTempAssetInfo()
 	{
 		var node = mTempAssetList.First;
 		while (node != null)
 		{
-			if ((node.Value != null) && (node.Value.IsNotUsed()))
+            bool isRemove = (node.Value != null) && node.Value.IsNotUsed();
+            if (isRemove)
 				node.Value.UnLoad();
-			node = node.Next;
-		}
 
-		mTempAssetList.Clear();
+            isRemove = isRemove || node.Value == null;
+            var delNode = node;
+			node = node.Next;
+            if (isRemove)
+                mTempAssetList.Remove(delNode);
+		}
 	}
 
     private static readonly string _Event_CACHEDESTROY_START = "OnCacheStartDestroy";

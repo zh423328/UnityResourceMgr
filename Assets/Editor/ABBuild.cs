@@ -1307,7 +1307,7 @@ class AssetBundleMgr
 											BuildAssetBundleOptions.ForceRebuildAssetBundle; // 永远重新打包
 		if (compressType == 0)
 			buildOpts |= BuildAssetBundleOptions.UncompressedAssetBundle;
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 		else if (compressType == 2)
 			buildOpts |= BuildAssetBundleOptions.ChunkBasedCompression;
 #endif
@@ -2160,14 +2160,14 @@ public static class AssetBundleBuild
 	// 支持的资源文件格式
 	private static readonly string[] ResourceExts = {".prefab", ".fbx",
 													 ".png", ".jpg", ".dds", ".gif", ".psd", ".tga", ".bmp",
-													 ".txt", ".bytes", ".xml", ".csv",
+													 ".txt", ".bytes", ".xml", ".csv", ".json",
 													 ".controller", ".shader", ".anim", ".unity", ".mat",
 													 ".wav", ".mp3", ".ogg",
 													 ".shadervariants"};
 	
 	private static readonly string[] ResourceXmlExts = {".prefab", ".fbx",
 														".tex", ".tex",  ".tex", ".tex", ".tex", ".tex", ".tex",
-														".bytes", ".bytes", ".bytes", ".bytes",
+														".bytes", ".bytes", ".bytes", ".bytes", ".bytes",
 														".controller", ".shader", ".anim", ".unity", ".mat",
 														".audio", ".audio", ".audio",
 														".shaderVar"};
@@ -2175,7 +2175,7 @@ public static class AssetBundleBuild
 	private static readonly Type[] ResourceExtTypes = {
 														typeof(UnityEngine.GameObject), typeof(UnityEngine.GameObject),
 														typeof(UnityEngine.Texture), typeof(UnityEngine.Texture), typeof(UnityEngine.Texture), typeof(UnityEngine.Texture), typeof(UnityEngine.Texture), typeof(UnityEngine.Texture), typeof(UnityEngine.Texture),
-														typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset),
+														typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset),
 														typeof(UnityEngine.Object), typeof(UnityEngine.Shader), typeof(UnityEngine.AnimationClip), null, typeof(UnityEngine.Material),
 														typeof(UnityEngine.AudioClip), typeof(UnityEngine.AudioClip), typeof(UnityEngine.AudioClip),
 														typeof(UnityEngine.ShaderVariantCollection)
@@ -2801,7 +2801,7 @@ public static class AssetBundleBuild
 		BuildPlatform (eBuildPlatform.eBuildIOS, 1, true);
 	}
 
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 
 	[MenuItem("Assets/平台打包/-----------")]
 	static public void OnBuildPlatformNone1() {
@@ -2958,13 +2958,13 @@ public static class AssetBundleBuild
 		Cmd_Build(0, true, eBuildPlatform.eBuildWindow, true);
 	}
 
-	#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 	[MenuItem("Assets/发布/Win32_Debug(Lz4)")]
 	static public void Cmd_BuidWin32_Debug_Lz4()
 	{
 		Cmd_Build(2, true, eBuildPlatform.eBuildWindow, true);
 	}
-	#endif
+#endif
 
     [MenuItem("Assets/发布/Win32(压缩)")]
     static public void Cmd_BuildWin32_Compress()
@@ -2972,7 +2972,7 @@ public static class AssetBundleBuild
         Cmd_Build(1, true, eBuildPlatform.eBuildWindow);
     }
 
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 	[MenuItem("Assets/发布/Win32(Lz4)")]
 	static public void Cmd_BuildWin32_Lz4() {
 		Cmd_Build(2, true, eBuildPlatform.eBuildWindow);
@@ -3087,7 +3087,7 @@ public static class AssetBundleBuild
         Cmd_Build(1, true, eBuildPlatform.eBuildAndroid);
     }
 
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 	[MenuItem("Assets/发布/APK_整包(Lz4)")]
 	static public void Cmd_BuildAPK_Lz4() {
 		Cmd_Build(2, true, eBuildPlatform.eBuildAndroid);

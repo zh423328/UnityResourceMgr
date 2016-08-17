@@ -97,11 +97,11 @@ public abstract class ITask
 		mResult = -1;
 	}
 
-	private int mResult = 0;
+	protected int mResult = 0;
 	private TaskList mOwner = null;
 }
 
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 
 // LoadFromFileAsync
 public class BundleCreateAsyncTask: ITask
@@ -117,6 +117,18 @@ public class BundleCreateAsyncTask: ITask
 		m_FileName = createFileName;
 	}
 
+	public BundleCreateAsyncTask()
+	{}
+
+	public static BundleCreateAsyncTask Create(string createFileName)
+	{
+		if (string.IsNullOrEmpty(createFileName))
+			return null;
+		BundleCreateAsyncTask ret = GetNewTask();
+		ret.m_FileName = createFileName;
+		return ret;
+	}
+
 	public static BundleCreateAsyncTask LoadFileAtStreamingAssetsPath(string fileName, bool usePlatform)
 	{
 		fileName = WWWFileLoadTask.GetStreamingAssetsPath(usePlatform, true) + "/" + fileName;
@@ -127,10 +139,8 @@ public class BundleCreateAsyncTask: ITask
 	public override void Release()
 	{
 		base.Release();
-		if (m_Req != null)
-		{
-			m_Req = null;
-		}
+		ItemPoolReset();
+		InPool(this);
 	}
 
 	public override void Process()
@@ -184,10 +194,79 @@ public class BundleCreateAsyncTask: ITask
 		set;
 	}
 
+    public string FileName
+    {
+        get
+        {
+            return m_FileName;
+        }
+    }
+
+	private static BundleCreateAsyncTask GetNewTask()
+	{
+		if (m_UsePool)
+		{
+			InitPool();
+			BundleCreateAsyncTask ret = m_Pool.GetObject();
+			if (ret != null)
+				ret.m_IsInPool = false;
+			return ret;
+		}
+
+		return new BundleCreateAsyncTask();
+	}
+
+	private static void InPool(BundleCreateAsyncTask task)
+	{
+		if (!m_UsePool || task == null || task.m_IsInPool)
+			return;
+		InitPool();
+		m_Pool.Store(task);	
+		task.m_IsInPool = true;
+	}
+
+	private void ItemPoolReset()
+	{
+		if (m_Req != null)
+		{
+			m_Req = null;
+		}
+
+		OnResult = null;
+		OnProcess = null;
+		m_Bundle = null;
+		m_Progress = 0;
+		m_FileName = string.Empty;
+		mResult = 0;
+		UserData = null;
+		_Owner = null;
+	}
+
+	private static void PoolReset(BundleCreateAsyncTask task)
+	{
+		if (task == null)
+			return;
+		task.ItemPoolReset();
+	}
+
+	private static void InitPool()
+	{
+		if (m_PoolInited)
+			return;
+		m_PoolInited = true;
+		m_Pool.Init(0, null, PoolReset);
+	}
+
 	private string m_FileName = string.Empty;
 	private AssetBundleCreateRequest m_Req = null;
 	private float m_Progress = 0;
 	private AssetBundle m_Bundle = null;
+
+	private bool m_IsInPool = false;
+
+	private static bool m_UsePool = true;
+	private static bool m_PoolInited = false;
+	private static Utils.ObjectPool<BundleCreateAsyncTask> m_Pool = new Utils.ObjectPool<BundleCreateAsyncTask>();
 }
 
 #endif
@@ -205,12 +284,25 @@ public class WWWFileLoadTask: ITask
 
 		mWWWFileName = wwwFileName;
 	}
+
+	public WWWFileLoadTask()
+	{}
+
+	public static WWWFileLoadTask Create(string wwwFileName)
+	{
+		if (string.IsNullOrEmpty(wwwFileName))
+			return null;
+		WWWFileLoadTask ret = GetNewTask();
+		ret.mWWWFileName = wwwFileName;
+		return ret;
+	}
+
 	
 	// 传入为普通文件名(推荐使用这个函数)
 	public static WWWFileLoadTask LoadFileName(string fileName)
 	{
 		string wwwFileName = ConvertToWWWFileName(fileName);
-		WWWFileLoadTask ret = new WWWFileLoadTask(wwwFileName);
+		WWWFileLoadTask ret = Create(wwwFileName);
 		return ret;
 	}
 	
@@ -239,7 +331,21 @@ public class WWWFileLoadTask: ITask
 			{
 				ret = "Assets/StreamingAssets";
 				if (usePlatform)
+                {
+#if UNITY_EDITOR
+                    var target = UnityEditor.EditorUserBuildSettings.activeBuildTarget;
+                    if (target == UnityEditor.BuildTarget.StandaloneOSXIntel || 
+                        target == UnityEditor.BuildTarget.StandaloneOSXIntel64 || 
+                        target == UnityEditor.BuildTarget.StandaloneOSXUniversal)
+                        ret += "/Mac";
+                    else if (target == UnityEditor.BuildTarget.Android)
+                        ret += "/Android";
+                    else if (target == UnityEditor.BuildTarget.iOS)
+                        ret += "/IOS";
+#else
 					ret += "/Mac";
+#endif
+                }
 				break;
 			}
 
@@ -255,7 +361,17 @@ public class WWWFileLoadTask: ITask
 			{
 				ret = "Assets/StreamingAssets";
 				if (usePlatform)
+                {
+#if UNITY_EDITOR
+                    var target = UnityEditor.EditorUserBuildSettings.activeBuildTarget;
+                    if (target == UnityEditor.BuildTarget.StandaloneWindows || target == UnityEditor.BuildTarget.StandaloneWindows64)
+                        ret += "/Windows";
+                    else if (target == UnityEditor.BuildTarget.Android)
+                        ret += "/Android";
+#else
 					ret += "/Windows";
+#endif
+                }
 				break;
 			}
 			case RuntimePlatform.Android:
@@ -315,16 +431,8 @@ public class WWWFileLoadTask: ITask
 	public override void Release()
 	{
 		base.Release ();
-
-		if (mLoader != null) {
-			mLoader.Dispose();
-			mLoader = null;
-		}
-
-		mByteData = null;
-		mBundle = null;
-		mProgress = 0;
-		mWWWFileName = string.Empty;
+		ItemPoolReset();
+		InPool(this);
 	}
 
 	public override void Process()
@@ -388,11 +496,74 @@ public class WWWFileLoadTask: ITask
 		set;
 	}
 
+	private void ItemPoolReset()
+	{
+		if (mLoader != null)
+		{
+			mLoader.Dispose();
+			mLoader = null;
+		}
+		OnResult = null;
+		OnProcess = null;
+		mProgress = 0;
+		mWWWFileName = string.Empty;
+		mResult = 0;
+		UserData = null;
+		_Owner = null;
+		mByteData = null;
+		mBundle = null;
+	}
+
+	private static WWWFileLoadTask GetNewTask()
+	{
+		if (m_UsePool)
+		{
+			InitPool();
+			WWWFileLoadTask ret = m_Pool.GetObject();
+			if (ret != null)
+				ret.m_IsInPool = false;
+			return ret;
+		}
+
+		return new WWWFileLoadTask();
+	}
+
+	private static void InPool(WWWFileLoadTask task)
+	{
+		if (!m_UsePool || task == null || task.m_IsInPool)
+			return;
+		InitPool();
+		m_Pool.Store(task);	
+		task.m_IsInPool = true;
+	}
+
+	private static void PoolReset(WWWFileLoadTask task)
+	{
+		if (task == null)
+			return;
+		task.ItemPoolReset();
+	}
+
+	private static void InitPool()
+	{
+		if (m_PoolInited)
+			return;
+		m_PoolInited = true;
+		m_Pool.Init(0, null, PoolReset);
+	}
+
 	private WWW mLoader = null;
 	private byte[] mByteData = null;
 	private AssetBundle mBundle = null;
 	private string mWWWFileName = string.Empty;
 	private float mProgress = 0;
+
+
+	private bool m_IsInPool = false;
+
+	private static bool m_UsePool = true;
+	private static bool m_PoolInited = false;
+	private static Utils.ObjectPool<WWWFileLoadTask> m_Pool = new Utils.ObjectPool<WWWFileLoadTask>();
 }
 
 // 加载场景任务
@@ -562,15 +733,13 @@ public class TaskList
 		get;
 		set;
 	}
-
-	// 慎用
+		
 	public void Clear()
 	{
-
 		var node = mTaskList.First;
 		while (node != null) {
 			var next = node.Next;
-			if (node.Value != null)
+			if (node.Value != null && node.Value._Owner == this)
 				node.Value.Release();
 			node = next;
 		}
@@ -584,7 +753,10 @@ public class TaskList
 		if ((task == null) || (!task.IsDone))
 			return;
 		if ((task._Owner == this) && (task.OnResult != null))
+		{
 			task.OnResult (task);
+			task.Release();
+		}
 	}
 
 	private void TaskProcess(ITask task)

@@ -34,13 +34,13 @@ namespace AutoUpdate
 	public class AutoUpdateMgr: Singleton<AutoUpdateMgr>
 	{
 		// 是否需要更新Version.txt
-		public bool IsVersionTxtNoUpdate()
+		internal bool IsVersionTxtNoUpdate()
 		{
 			int ret = string.Compare(LocalResVersion, CurrServeResrVersion, StringComparison.CurrentCultureIgnoreCase);
 			return ret >= 0;
 		}
 
-		public bool IsVersionNoUpdate()
+        internal bool IsVersionNoUpdate()
 		{
 			return IsVersionTxtNoUpdate() &&
 				   string.Compare(LocalFileListContentMd5, ServerFileListContentMd5,  StringComparison.CurrentCultureIgnoreCase) == 0;
@@ -59,7 +59,7 @@ namespace AutoUpdate
 			RegisterStates();
 		}
 
-		public string WritePath
+        internal string WritePath
 		{
 			get
 			{
@@ -110,20 +110,35 @@ namespace AutoUpdate
 			}
 		}
 
-		public void Release()
-		{
-			HttpRelease();
+		internal void Release()
+        {
+            HttpRelease();
 			TasksRelease();
-		}
+        }
 
-		internal void ChangeState(AutoUpdateState state)
-		{
-			Release();
-			lock(m_Lock)
-			{
-				m_StateMgr.ChangeState(state);
-			}
-		}
+        public void Clear()
+        {
+            m_StateMsgList.Clear();
+            Release();
+        }
+
+        public Action<AutoUpdateState> OnStateChanged
+        {
+            get;
+            set;
+        }
+
+        private void CallStateChanged(AutoUpdateState state)
+        {
+             if (OnStateChanged != null)
+                OnStateChanged(state);
+        }
+
+        public void ChangeState(AutoUpdateState state)
+        {
+            Release();
+            AddChgState(state);
+        }
 
 		internal void ServerFileListToClientFileList()
 		{
@@ -190,37 +205,73 @@ namespace AutoUpdate
 				File.Delete(updateFileName);
 		}
 
+        private void AddChgState(AutoUpdateState state)
+        {
+            AutoUpdateMsgNode node = AutoUpdateMsgNode.Create();
+            node.autoUpdateState = (int)state;
+            lock (m_Lock)
+            {
+                m_StateMsgList.AddLast(node);
+            }
+        }
+
+        private void AddErrMsg(AutoUpdateErrorType errType, int errStatus)
+        {
+            AutoUpdateMsgNode node = AutoUpdateMsgNode.Create();
+            node.errType = (int)errType;
+            node.errStatus = errStatus;
+            lock (m_Lock)
+            {
+                m_StateMsgList.AddLast(node);
+            }
+        }
+
 		// 开始
-		public void StartAutoUpdate()
+		public void StartAutoUpdate(string url, float connectTimeOut = 5.0f, int httpFileBufSize = 1024 * 64)
 		{
+            Clear();
+            m_ResServerAddr = url;
+
 			DownProcess = 0;
-			lock(m_Lock)
-			{
-				m_StateMgr.ChangeState(AutoUpdateState.auPrepare);
+			m_HttpConnectTimeOut = connectTimeOut;
+			m_HttpFileBufSize = httpFileBufSize;
+
+            AddChgState(AutoUpdateState.auPrepare);
+        }
+
+		public float HttpConnectTimeOut
+		{
+			get {
+				return m_HttpConnectTimeOut;
 			}
 		}
 
-		public void EndAutoUpdate()
+		public int HttpFileBufSize
+		{
+			get
+			{
+				return m_HttpFileBufSize;
+			}
+		}
+
+		internal void EndAutoUpdate()
 		{
 			Release();
-			lock(m_Lock)
-			{
-				m_StateMgr.ChangeState(AutoUpdateState.auEnd);
-			}
+            AddChgState(AutoUpdateState.auEnd);
 		}
 
-		public HttpClient CreateHttpTxt(string url, Action<HttpClientResponse, long> OnReadEvt, 
+		internal HttpClient CreateHttpTxt(string url, Action<HttpClientResponse, long> OnReadEvt, 
 		                                Action<HttpClientResponse, int> OnErrorEvt)
 		{
 			HttpRelease();
 			HttpClientStrResponse response = new HttpClientStrResponse();
 			response.OnReadEvt = OnReadEvt;
 			response.OnErrorEvt = OnErrorEvt;
-			m_HttpClient = new HttpClient(url, response, 5.0f);
+			m_HttpClient = new HttpClient(url, response, m_HttpConnectTimeOut);
 			return m_HttpClient;
 		}
 
-		public HttpClient CreateHttpFile(string url, long process, Action<HttpClientResponse, long> OnReadEvt,
+		internal HttpClient CreateHttpFile(string url, long process, Action<HttpClientResponse, long> OnReadEvt,
 		                                 Action<HttpClientResponse, int> OnErrorEvt)
 		{
 			if (string.IsNullOrEmpty(m_WritePath))
@@ -228,17 +279,17 @@ namespace AutoUpdate
 			string fileName = Path.GetFileName(url);
 			string dstFileName = string.Format("{0}/{1}", m_WritePath, fileName);
 			HttpRelease();
-			HttpClientFileStream response = new HttpClientFileStream(dstFileName, process, 1024 * 64);
+			HttpClientFileStream response = new HttpClientFileStream(dstFileName, process, m_HttpFileBufSize);
 			response.OnReadEvt = OnReadEvt;
 			response.OnErrorEvt = OnErrorEvt;
 			lock(m_Lock)
 			{
-				m_HttpClient = new HttpClient(url, response, process, 5.0f);
+				m_HttpClient = new HttpClient(url, response, process, m_HttpConnectTimeOut);
 			}
 			return m_HttpClient;
 		}
 
-		public WWWFileLoadTask CreateWWWStreamAssets(string fileName, bool usePlatform)
+		internal WWWFileLoadTask CreateWWWStreamAssets(string fileName, bool usePlatform)
 		{
 			WWWFileLoadTask ret = WWWFileLoadTask.LoadFileAtStreamingAssetsPath(fileName, usePlatform);
 			lock(m_Lock)
@@ -252,8 +303,9 @@ namespace AutoUpdate
 		{
 			get
 			{
-				return "http://192.168.199.147:1983";
-			}
+                return m_ResServerAddr;
+
+            }
 		}
 
 		internal string CurrServeResrVersion
@@ -280,14 +332,51 @@ namespace AutoUpdate
 			set;
 		}
 
+        public Action<AutoUpdateErrorType, int> OnError
+        {
+            get;
+            set;
+        }
+
 		internal void Error(AutoUpdateErrorType errType, int status)
-		{}
+		{
+            AddErrMsg(errType, status);
+        }
 
 		public void Update()
 		{
 			TasksUpdate();
 			StateUpdate();
-		}
+            StateMsgUpdate();
+        }
+
+        void StateMsgUpdate()
+        {
+            do
+            {
+                LinkedListNode<AutoUpdateMsgNode> node;
+                lock (m_Lock)
+                {
+                    node = m_StateMsgList.First;
+                    if (node == null)
+                        break;
+                    m_StateMsgList.RemoveFirst();
+                }
+
+                if (node.Value.autoUpdateState >= 0)
+                {
+                    AutoUpdateState state = (AutoUpdateState)node.Value.autoUpdateState;
+                    if (m_StateMgr.ChangeState(state))
+                        CallStateChanged(state);
+                }
+                else if (node.Value.errType >= 0)
+                {
+                    AutoUpdateErrorType errType = (AutoUpdateErrorType)node.Value.errType; 
+                    if (OnError != null)
+                        OnError(errType, node.Value.errStatus);
+                }
+            } while (true);
+        }
 
 		void TasksUpdate()
 		{
@@ -300,18 +389,16 @@ namespace AutoUpdate
 
 		void StateUpdate()
 		{
-			lock(m_Lock)
-			{
-				if (m_StateMgr != null)
-					m_StateMgr.Process(this);
-			}
-		}
+            if (m_StateMgr != null)
+                m_StateMgr.Process(this);
+        }
 
+        /*
 		public Action<int, long, bool> OnDownloadFileEvt
 		{
 			get;
 			set;
-		}
+		}*/
 
 		public float DownProcess
 		{
@@ -335,11 +422,12 @@ namespace AutoUpdate
 			}
 		}
 
+        /*
 		internal void CallDownloadFileEvt(int idx, long readBytes, bool isDone)
 		{
 			if (OnDownloadFileEvt != null)
 				OnDownloadFileEvt(idx, readBytes, isDone);
-		}
+		}*/
 
 		private bool GetResVer(string content, out string ver, out string fileListMd5)
 		{
@@ -439,6 +527,22 @@ namespace AutoUpdate
 			}
 		}
 
+        private struct AutoUpdateMsgNode
+        {
+            public static AutoUpdateMsgNode Create()
+            {
+                AutoUpdateMsgNode ret = new AutoUpdateMsgNode();
+                ret.autoUpdateState = -1;
+                ret.errType = -1;
+                ret.errStatus = 0;
+                return ret;
+            }
+
+            public int autoUpdateState;
+            public int errType;
+            public int errStatus;
+        }
+
 		internal static readonly string _cVersionTxt = "version.txt";
 		internal static readonly string _cFileListTxt = "fileList.txt";
 		internal static readonly string _cUpdateTxt = "update.txt";
@@ -452,5 +556,10 @@ namespace AutoUpdate
 		private AutoUpdateCfgFile m_UpdateFile = null;
 		private float m_DownProcess = 0;
 		private object m_Lock = new object();
+        // 资源服务器地址 例如：http://192.168.199.147:1983
+        private string m_ResServerAddr = string.Empty;
+        private LinkedList<AutoUpdateMsgNode> m_StateMsgList = new LinkedList<AutoUpdateMsgNode>();
+		private float m_HttpConnectTimeOut = 5.0f;
+		private int m_HttpFileBufSize = 1024 * 64;
 	}
 }

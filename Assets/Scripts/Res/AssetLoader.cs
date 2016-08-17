@@ -154,7 +154,7 @@ public class AssetInfo
 		}
 	}
 
-	#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 	internal BundleCreateAsyncTask AsyncTask
 	{
 		get
@@ -162,12 +162,12 @@ public class AssetInfo
 			return m_AsyncTask;
 		}
 	}
-	#endif
+#endif
 	
 	private WWWFileLoadTask m_WWWTask = null;
-	#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 	private BundleCreateAsyncTask m_AsyncTask = null;
-	#endif
+#endif
 	private TaskList m_TaskList = null;
 	private Timer m_Timer = null;
 	private Action<bool> m_EndEvt = null;
@@ -187,13 +187,13 @@ public class AssetInfo
 			m_WWWTask = null;
 		}
 
-		#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 		if (m_AsyncTask != null)
 		{
 			m_AsyncTask.Release();
 			m_AsyncTask = null;
 		}
-		#endif
+#endif
 
 		if (m_TaskList != null)
 		{
@@ -248,7 +248,7 @@ public class AssetInfo
 		return m_TaskList;
 	}
 
-	#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 	private static void OnLocalAsyncResult(ITask task)
 	{
 		BundleCreateAsyncTask asycTask = task as BundleCreateAsyncTask;
@@ -257,14 +257,18 @@ public class AssetInfo
 		AssetInfo info = asycTask.UserData as AssetInfo;
 		if (info == null)
 			return;
-		if (asycTask.IsDone && asycTask.IsOk)
+		if (asycTask.IsDone)
 		{
-			info.mBundle = asycTask.Bundle;
+			if (asycTask.IsOk)
+				info.mBundle = asycTask.Bundle;
+
+			if (info.m_AsyncTask != null)
+				info.m_AsyncTask = null;
 		}
 
 		info.IsUsing = false;
 	}
-	#endif
+#endif
 
 	private static void OnLocalWWWResult(ITask task)
 	{
@@ -274,9 +278,12 @@ public class AssetInfo
 		AssetInfo info = wwwTask.UserData as AssetInfo;
 		if (info == null)
 			return;
-		if (wwwTask.IsDone && wwwTask.IsOk)
+		if (wwwTask.IsDone)
 		{
-			info.mBundle = wwwTask.Bundle;
+			if (wwwTask.IsOk)
+				info.mBundle = wwwTask.Bundle;
+			if (info.m_WWWTask != null)
+				info.m_WWWTask = null;
 		}
 
 		info.IsUsing = false;
@@ -296,7 +303,7 @@ public class AssetInfo
 		}
 	}
 
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 
 	// 5.3新的异步加载方法
 	public bool LoadAsync(TaskList taskList)
@@ -315,7 +322,7 @@ public class AssetInfo
 			return true;
 		}
 
-		m_AsyncTask = new BundleCreateAsyncTask(mFileName);
+		m_AsyncTask = BundleCreateAsyncTask.Create(mFileName);
 		if (m_AsyncTask != null)
 		{
 			m_AsyncTask.UserData = this;
@@ -399,7 +406,7 @@ public class AssetInfo
 	//	mIsLoading = false;
 		if (mCompressType == AssetCompressType.astNone) {
 			ClearTaskData();
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 			mBundle = AssetBundle.LoadFromFile (mFileName);
 #else
 			mBundle = AssetBundle.CreateFromFile(mFileName);
@@ -408,13 +415,13 @@ public class AssetInfo
 				return false;
 		} else 
 		if (mCompressType == AssetCompressType.astUnityLzo
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 			|| mCompressType == AssetCompressType.astUnityZip
 #endif
 			) {
 			// Lz4 new compressType
 			ClearTaskData();
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 			mBundle = AssetBundle.LoadFromFile(mFileName);
 #else
 			mBundle = AssetBundle.CreateFromFile(mFileName);
@@ -762,6 +769,10 @@ public class AssetInfo
 
 	public void UnLoad()
 	{
+#if UNITY_EDITOR
+		if (IsVaild() && IsUsing)
+			Debug.LogErrorFormat("{0} is using but unload!", mFileName);
+#endif
 		if (IsVaild() && !IsUsing) {
 
 			// LogMgr.Instance.Log(string.Format("Bundle unload=>{0}", Path.GetFileNameWithoutExtension(mFileName)));
@@ -780,7 +791,7 @@ public class AssetInfo
 
 	public void UnUsed()
 	{
-		if (IsVaild() && !IsUsing) {
+		if (IsVaild() /*&& !IsUsing*/) {
 
 			m_OrgResMap.Clear();
 			m_AsyncLoadDict.Clear();
@@ -948,7 +959,7 @@ public class AssetLoader: IResourceLoader
 		if (asset == null)
 			return false;
 		int addCount = 0;
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 		if (asset.CompressType == AssetCompressType.astUnityLzo || 
 			asset.CompressType == AssetCompressType.astUnityZip || 
 			asset.CompressType == AssetCompressType.astNone
@@ -1034,7 +1045,7 @@ public class AssetLoader: IResourceLoader
 
 		int addCount = 0;
 		//bool isNew = asset.IsNew();
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 		if (asset.CompressType == AssetCompressType.astUnityLzo || 
 			asset.CompressType == AssetCompressType.astUnityZip ||
 			asset.CompressType == AssetCompressType.astNone
@@ -1323,8 +1334,8 @@ public class AssetLoader: IResourceLoader
 			return false;
 
 		int addCount = 0;
-	//	bool isNew = asset.IsNew();
-#if UNITY_5_3
+		//	bool isNew = asset.IsNew();
+#if UNITY_5_3 || UNITY_5_4
 		if (asset.CompressType == AssetCompressType.astUnityLzo || 
 			asset.CompressType == AssetCompressType.astUnityZip ||
 			asset.CompressType == AssetCompressType.astNone
@@ -1518,7 +1529,7 @@ public class AssetLoader: IResourceLoader
 	}
 #endif	
 
-#if UNITY_5_3
+#if UNITY_5_3 || UNITY_5_4
 
 	internal bool LoadAsyncAssetInfo(AssetInfo asset, TaskList taskList, ref int addCount, Action<bool> onEnd = null)
 	{
@@ -1982,6 +1993,26 @@ public class AssetLoader: IResourceLoader
 		}*/
 	}
 
+	// 资源更新清理
+	public void AutoUpdateClear()
+	{
+		mConfigLoaderEvent = null;
+
+		if (mLoaderTimer != null)
+		{
+			mLoaderTimer.Dispose();
+			mLoaderTimer = null;
+		}
+
+		if (mXmlLoaderTask != null)
+		{
+			mXmlLoaderTask.Release();
+			mXmlLoaderTask = null;
+		}
+
+		mAssetFileNameMap.Clear();
+	}
+
 	private void LoadXml(byte[] bytes)
 	{
 		if ((bytes == null) || (bytes.Length <= 0)) {
@@ -2049,7 +2080,11 @@ public class AssetLoader: IResourceLoader
 			}
 
 			bool isUseCreateFromFile = compressType == AssetCompressType.astNone ||
-										compressType == AssetCompressType.astUnityLzo;
+										compressType == AssetCompressType.astUnityLzo
+#if UNITY_5_3 || UNITY_5_4
+                                        || compressType == AssetCompressType.astUnityZip
+#endif
+                                        ;
 			string assetBundleFileName = GetCheckFileName(localFileName, false, isUseCreateFromFile);
 
 			AssetInfo asset;
@@ -2162,7 +2197,7 @@ public class AssetLoader: IResourceLoader
 			string fileName = GetXmlFileName ();
 			if (string.IsNullOrEmpty (fileName))
 				return;
-			mXmlLoaderTask = new WWWFileLoadTask (fileName);
+			mXmlLoaderTask = WWWFileLoadTask.Create(fileName);
 			if (mXmlLoaderTask.IsDoing) {
 				// 创建时钟
 				if (mLoaderTimer == null)
