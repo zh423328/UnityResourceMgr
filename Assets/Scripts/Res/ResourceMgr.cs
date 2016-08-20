@@ -143,17 +143,99 @@ public class ResourceMgr: Singleton<ResourceMgr>
 		// 清除
 		AssetCacheManager.Instance.ClearUnUsed ();
 	}
-
+	 
 	public GameObject CreateGameObject(string fileName)
 	{
 		GameObject ret = CreatePrefab(fileName);
 		if (ret != null)
 		{
-			ret.AddComponent<ResInstDestroy>();
+			var script = ret.AddComponent<ResInstDestroy>();
+			script.CheckVisible();
 		}
 
 		return ret;
 	}
+
+	public GameObject CreateGameObject(string fileName, Vector3 position, Quaternion rotation)
+	{
+		GameObject ret = CreatePrefab(fileName);
+		if (ret != null) {
+			Transform trans = ret.transform;
+			trans.position = position;
+			trans.rotation = rotation;
+			var script = ret.AddComponent<ResInstDestroy> ();
+			script.CheckVisible();
+		}
+
+		return ret;
+	}
+
+	public GameObject CreateGameObject(string fileName, Vector3 position, Quaternion rotation, float delayDestroyTime)
+	{
+		GameObject ret = CreatePrefab(fileName);
+		if (ret != null)
+		{
+			Transform trans = ret.transform;
+			trans.position = position;
+			trans.rotation = rotation;
+			ResInstDelayDestroy script = ret.AddComponent<ResInstDelayDestroy>();
+			script.DelayDestroyTime = delayDestroyTime;
+			script.CheckVisible();
+		}
+
+		return ret;
+	}
+
+    public GameObject InstantiateGameObj(GameObject orgObj)
+    {
+        if (orgObj == null)
+            return null;
+        GameObject ret = GameObject.Instantiate(orgObj);
+        if (ret != null)
+        {
+            AssetCacheManager.Instance._OnCreateGameObject(ret, orgObj);
+            var script = ret.AddComponent<ResInstDestroy>();
+			script.CheckVisible();
+        }
+        return ret;
+    }
+
+    public GameObject InstantiateGameObj(GameObject orgObj, Vector3 position, Quaternion rotation)
+    {
+        GameObject ret = InstantiateGameObj(orgObj);
+        if (ret == null)
+            return null;
+        Transform trans = ret.transform;
+        trans.position = position;
+        trans.rotation = rotation;
+        return ret;
+    }
+
+    public GameObject InstantiateGameObj(GameObject orgObj, float delayDestroyTime)
+    {
+        if (orgObj == null)
+            return null;
+        GameObject ret = GameObject.Instantiate(orgObj);
+        if (ret != null)
+        {
+            AssetCacheManager.Instance._OnCreateGameObject(ret, orgObj);
+            ResInstDelayDestroy script = ret.AddComponent<ResInstDelayDestroy>();
+            script.DelayDestroyTime = delayDestroyTime;
+			script.CheckVisible();
+        }
+        return ret;
+    }
+
+    public GameObject InstantiateGameObj(GameObject orgObj, Vector3 position, Quaternion rotation, float delayDestroyTime)
+    {
+        GameObject ret = InstantiateGameObj(orgObj, delayDestroyTime);
+        if (ret == null)
+            return null;
+        Transform trans = ret.transform;
+        trans.position = position;
+        trans.rotation = rotation;
+        return ret;
+    }
 
 	public GameObject CreateGameObject(string fileName, float delayDestroyTime)
 	{
@@ -162,6 +244,7 @@ public class ResourceMgr: Singleton<ResourceMgr>
 		{
 			ResInstDelayDestroy script = ret.AddComponent<ResInstDelayDestroy>();
 			script.DelayDestroyTime = delayDestroyTime;
+			script.CheckVisible();
 		}
 
 		return ret;
@@ -286,7 +369,10 @@ public class ResourceMgr: Singleton<ResourceMgr>
 			if (isDone)
 			{
 				if (instObj != null)
-					instObj.AddComponent<ResInstDestroy>();
+				{
+					var script = instObj.AddComponent<ResInstDestroy>();
+					script.CheckVisible();
+				}
 				if (onProcess != null)
 					onProcess(process, isDone, instObj);
 				return;
@@ -310,6 +396,7 @@ public class ResourceMgr: Singleton<ResourceMgr>
 				{
 					ResInstDelayDestroy script = instObj.AddComponent<ResInstDelayDestroy>();
 					script.DelayDestroyTime = delayDestroyTime;
+					script.CheckVisible();
 				}
 				if (onProcess != null)
 					onProcess(process, isDone, instObj);
