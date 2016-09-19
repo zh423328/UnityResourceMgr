@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿#define USE_CHECK_VISIBLE
+using UnityEngine;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -6,14 +7,21 @@ using Utils;
 
 public class BaseResLoader: CachedMonoBehaviour
 {
-	protected static readonly string _cMainTex = "_MainTex";
-	protected static readonly string _cMainMat = "_Mat_0";
+	public static readonly string _cMainTex = "_MainTex";
+	public static readonly string _cMainMat = "_Mat_0";
+	public static readonly string _cMat1 = "_Mat_1";
+	public static readonly string _cMat2 = "_Mat_2";
+	public static readonly string _cMat3 = "_Mat_3";
+
 	private Dictionary<ResKey, ResValue> m_ResMap = null;
 
+	#if USE_CHECK_VISIBLE
 	private bool m_IsCheckedVisible = false;
+	#endif
 
 	private void CheckVisible()
 	{
+		#if USE_CHECK_VISIBLE
 		if (m_IsCheckedVisible)
 			return;
 		m_IsCheckedVisible = true;
@@ -25,6 +33,7 @@ public class BaseResLoader: CachedMonoBehaviour
 			obj.SetActive(true);
 			obj.SetActive(false);
 		}
+		#endif
 	}
 
 	private void CheckResMap()
@@ -35,12 +44,17 @@ public class BaseResLoader: CachedMonoBehaviour
 
 	protected bool FindResValue(ResKey key, out ResValue value)
 	{
-		value = new ResValue ();
+		value = null;
 		if (m_ResMap == null)
 			return false;
 		return m_ResMap.TryGetValue (key, out value);
 	}
 
+    protected bool Contains(ResKey key) {
+        if (m_ResMap == null)
+            return false;
+        return m_ResMap.ContainsKey(key);
+    }
 
 	protected bool FindResValue(int instanceId, System.Type resType, out ResValue value, string resName = "")
 	{
@@ -50,7 +64,7 @@ public class BaseResLoader: CachedMonoBehaviour
 
 	protected bool FindResValue(UnityEngine.Object target, System.Type resType, out ResValue value, string resName = "")
 	{
-		value = new ResValue ();
+		value = null;
 		if (target == null)
 			return false;
 		return FindResValue (target.GetInstanceID (), resType, out value, resName);
@@ -64,18 +78,88 @@ public class BaseResLoader: CachedMonoBehaviour
 		return ret;
 	}
 
-	protected struct ResKey
+	protected struct ResKey : IEquatable<ResKey>
 	{
 		public int instanceId;
 		public System.Type resType;
 		public string resName;
+
+        public bool Equals(ResKey other) {
+            return this == other;
+        }
+
+        public override bool Equals(object obj) {
+			if (obj == null)
+				return false;
+			
+			if (GetType() != obj.GetType())
+				return false;
+			
+            if (obj is ResKey) {
+                ResKey other = (ResKey)obj;
+                return Equals(other);
+            }
+            else
+                return false;
+
+        }
+
+        public override int GetHashCode() {
+            int ret = FilePathMgr.InitHashValue();
+            FilePathMgr.HashCode(ref ret, instanceId);
+            FilePathMgr.HashCode(ref ret, resType);
+            FilePathMgr.HashCode(ref ret, resName);
+            return ret;
+        }
+
+        public static bool operator ==(ResKey a, ResKey b) {
+            return (a.instanceId == b.instanceId) && (a.resType == b.resType) && (string.Compare(a.resName, b.resName) == 0);
+        }
+
+        public static bool operator !=(ResKey a, ResKey b) {
+            return !(a == b);
+        }
 	}
 
-	protected struct ResValue
+	protected class ResValue
 	{
 		public UnityEngine.Object obj;
 		public UnityEngine.Object[] objs;
 		public string tag;
+
+        public void Release() {
+            InPool(this);
+        }
+
+        public static ResValue Create() {
+            InitPool();
+            ResValue ret = m_Pool.GetObject();
+            return ret;
+        }
+
+        private void Reset() {
+            obj = null;
+            objs = null;
+            tag = string.Empty;
+        }
+
+        private static void InPool(ResValue obj) {
+            if (obj == null)
+                return;
+            InitPool();
+            obj.Reset();
+            m_Pool.Store(obj);
+        }
+
+        private static void InitPool() {
+            if (m_InitPool)
+                return;
+            m_InitPool = true;
+            m_Pool.Init(0);
+        }
+
+        private static bool m_InitPool = false;
+        private static ObjectPool<ResValue> m_Pool = new ObjectPool<ResValue>();
 	}
 
 	protected static ResKey CreateKey(int instanceId, System.Type resType, string resName = "")
@@ -89,7 +173,7 @@ public class BaseResLoader: CachedMonoBehaviour
 
 	protected ResValue CreateValue(UnityEngine.Object obj, string tag = "")
 	{
-		ResValue ret = new ResValue();
+        ResValue ret = ResValue.Create();
 		ret.obj = obj;
 		ret.objs = null;
 		ret.tag = tag;
@@ -98,7 +182,7 @@ public class BaseResLoader: CachedMonoBehaviour
 
 	protected ResValue CreateValue(UnityEngine.Object[] objs, string tag = "")
 	{
-		ResValue ret = new ResValue();
+        ResValue ret = ResValue.Create();
 		ret.obj = null;
 		ret.objs = objs;
 		ret.tag = tag;
@@ -143,6 +227,7 @@ public class BaseResLoader: CachedMonoBehaviour
 					ResourceMgr.Instance.DestroyObjects(res.objs);
 			}
 			m_ResMap.Remove(key);
+            res.Release();
 		}
 	}
 
@@ -207,7 +292,7 @@ public class BaseResLoader: CachedMonoBehaviour
 		SetResources(target.GetInstanceID(), res, resType, resName, tag);
 	}
 
-	protected void ClearAllResources()
+	public void ClearAllResources()
 	{
 		if (m_ResMap == null)
 			return;
@@ -223,6 +308,9 @@ public class BaseResLoader: CachedMonoBehaviour
 				if (iter.Current.Value.objs != null)
 					ResourceMgr.Instance.DestroyObjects(iter.Current.Value.objs);
 			}
+
+            // 進入池
+            iter.Current.Value.Release();
 		}
 		iter.Dispose();
 		m_ResMap.Clear();
@@ -241,17 +329,38 @@ public class BaseResLoader: CachedMonoBehaviour
 		ResourceMgr.Instance.DestroyObject(sp);
 	}
 
+	protected int SetMaterialResource(UnityEngine.Object target, string fileName, out Material mat)
+	{
+		mat = null;
+		if (target == null || string.IsNullOrEmpty (fileName))
+			return 0;
+		ResKey key = CreateKey (target.GetInstanceID (), typeof(Material));
+		ResValue value;
+		if (FindResValue (key, out value)) {
+			if (string.Compare (value.tag, fileName) == 0)
+				// 相等说明当前已经是，所以不需要外面设置了
+				mat = value.obj as Material;
+			return 1;
+		}
+
+		mat = ResourceMgr.Instance.LoadMaterial(fileName, ResourceCacheType.rctRefAdd);
+		SetResources(target, null, typeof(Material[]));
+		SetResource(target, mat, typeof(Material), "", fileName);
+		return 2;
+	}
+
 	public bool LoadMaterial(MeshRenderer renderer, string fileName)
 	{
-		if (renderer == null || string.IsNullOrEmpty(fileName))
-			return false;
 
-		Material mat = null;
-		if (!string.IsNullOrEmpty(fileName))
-			mat = ResourceMgr.Instance.LoadMaterial(fileName, ResourceCacheType.rctRefAdd);
-		SetResources(renderer, null, typeof(Material[]));
-		SetResource(renderer, mat, typeof(Material));
-		renderer.sharedMaterial = mat;
+		Material mat;
+		int result = SetMaterialResource (renderer, fileName, out mat);
+		if (result == 0) {
+			renderer.sharedMaterial = null;
+			return false;
+		}
+
+		if (result == 2)
+			renderer.sharedMaterial = mat;
 		return mat != null;
 	}
 
@@ -267,15 +376,15 @@ public class BaseResLoader: CachedMonoBehaviour
 
 	public bool LoadMaterial(SpriteRenderer sprite, string fileName)
 	{
-		if (sprite == null || string.IsNullOrEmpty(fileName))
-			return false;
-		Material mat = ResourceMgr.Instance.LoadMaterial(fileName, ResourceCacheType.rctRefAdd);
-		SetResource(sprite, mat, typeof(Material));
-
-		if (mat != null)
-			sprite.sharedMaterial = mat;
-		else
+		Material mat;
+		int result = SetMaterialResource (sprite, fileName, out mat);
+		if (result == 0) {
 			sprite.sharedMaterial = null;
+			return false;
+		}
+
+		if (result == 2)
+			sprite.sharedMaterial = mat;
 
 		return mat != null;
 	}
@@ -513,4 +622,72 @@ public class BaseResLoader: CachedMonoBehaviour
         target.runtimeAnimatorController = ctl;
         return ctl != null;
     }
+
+	public static void DestroyGameObj(GameObject obj)
+	{
+		if (obj == null)
+			return;
+		BaseResLoader loader = obj.GetComponent<BaseResLoader> ();
+		if (loader != null) {
+			loader.ClearAllResources ();
+		}
+		
+		GameObject.Destroy (obj);
+	}
+
+	public List<UnityEngine.Object> GetResList()
+		{
+			if (m_ResMap == null) {
+				return null;
+			}
+
+			List<UnityEngine.Object> list = new List<UnityEngine.Object> ();
+			var iter = m_ResMap.GetEnumerator ();
+			while (iter.MoveNext ()) {
+				if (iter.Current.Value.obj != null) {
+					list.Add (iter.Current.Value.obj);
+				}
+				if (iter.Current.Value.objs != null) {
+					for (int i = 0; i < iter.Current.Value.objs.Length; ++i) {
+						list.Add (iter.Current.Value.objs [i]);
+					}
+				}
+			}
+			iter.Dispose ();
+			return list;
+		}
+
+		public void ClearMainTexture(MeshRenderer renderer)
+		{
+			if (renderer == null)
+				return;
+			
+			ClearResource<Texture> (renderer, _cMainTex);
+		}
+			
+		public bool LoadMainTexture(MeshRenderer renderer, string fileName)
+		{
+			if (renderer == null || string.IsNullOrEmpty (fileName) || renderer.sharedMaterial == null)
+				return false;
+			ClearMainTexture (renderer);
+			Texture tex = ResourceMgr.Instance.LoadTexture (fileName, ResourceCacheType.rctRefAdd);
+			SetResource(renderer, tex, typeof(Texture), _cMainTex);
+			renderer.material.mainTexture = tex;
+			return tex != null;
+		}
+
+	public GameObject CreateGameObject(string fileName)
+	{
+		GameObject ret = ResourceMgr.Instance.CreateGameObject(fileName);
+		return ret;
+	}
+
+	public T CreateGameObject<T>(string fileName) where T: UnityEngine.Component
+	{
+		GameObject obj = ResourceMgr.Instance.CreateGameObject(fileName);
+		if (obj == null)
+			return null;
+		T ret = obj.GetComponent<T>();
+		return ret;
+	}
 }

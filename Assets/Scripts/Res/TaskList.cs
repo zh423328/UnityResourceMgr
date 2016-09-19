@@ -120,6 +120,11 @@ public class BundleCreateAsyncTask: ITask
 	public BundleCreateAsyncTask()
 	{}
 
+	public static int GetPoolCount()
+	{
+		return m_Pool.Count;
+	}
+
 	public static BundleCreateAsyncTask Create(string createFileName)
 	{
 		if (string.IsNullOrEmpty(createFileName))
@@ -496,6 +501,11 @@ public class WWWFileLoadTask: ITask
 		set;
 	}
 
+	public static int GetPoolCount()
+	{
+		return m_Pool.Count;
+	}
+
 	private void ItemPoolReset()
 	{
 		if (mLoader != null)
@@ -698,15 +708,24 @@ public class TaskList
 		}
 	}
 
-	public void Process()
+	public void Process(Func<ITask, bool> onCheckTaskVaild = null)
 	{
 		LinkedListNode<ITask> node = mTaskList.First;
 		if ((node != null) && (node.Value != null)) {
+
+			if (onCheckTaskVaild != null)
+			{
+				if (!onCheckTaskVaild(node.Value))
+				{
+					RemoveTask(node);
+					return;
+				}
+			}
+
 			if (node.Value.IsDone)
 			{
 				TaskEnd(node.Value);
-				mTaskIDs.Remove(node.Value.GetHashCode());
-				mTaskList.RemoveFirst();
+				RemoveTask(node);
 				return;
 			}
 
@@ -715,8 +734,7 @@ public class TaskList
 			if (node.Value.IsDone)
 			{
 				TaskEnd(node.Value);
-				mTaskIDs.Remove(node.Value.GetHashCode());
-				mTaskList.RemoveFirst();
+				RemoveTask(node);
 			}
 		}
 	}
@@ -746,6 +764,38 @@ public class TaskList
 
 		mTaskList.Clear ();
 		mTaskIDs.Clear();
+	}
+
+	private void RemoveTask(LinkedListNode<ITask> node)
+	{
+		if (node == null || node.Value == null)
+			return;
+		int hashCode = node.Value.GetHashCode();
+		if (mTaskIDs.Contains(hashCode))
+		{
+			mTaskIDs.Remove(hashCode);
+			mTaskList.Remove(node);
+		}
+	}
+
+	public void RemoveTask(ITask task)
+	{
+		if (task == null)
+			return;
+		int hashCode = task.GetHashCode();
+		if (mTaskIDs.Contains(hashCode))
+		{
+			mTaskIDs.Remove(hashCode);
+			mTaskList.Remove(task);
+		}
+	}
+
+	public int Count
+	{
+		get
+		{
+			return mTaskList.Count;
+		}
 	}
 
 	private void TaskEnd(ITask task)

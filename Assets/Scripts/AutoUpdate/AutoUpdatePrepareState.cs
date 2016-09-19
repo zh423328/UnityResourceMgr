@@ -10,6 +10,7 @@ namespace AutoUpdate
 	{
 		private string m_FileListName = string.Empty;
 		private string m_VersionName = string.Empty;
+		private string m_UpdateName = string.Empty;
 
 		private void CopyFileList()
 		{
@@ -26,6 +27,7 @@ namespace AutoUpdate
 		void LoadLocalResVersion()
 		{
 			AutoUpdateMgr.Instance.LocalResVersion = string.Empty;
+			AutoUpdateMgr.Instance.LocalFileListContentMd5 = string.Empty;
 
 			if (File.Exists(m_VersionName))
 			{
@@ -49,7 +51,7 @@ namespace AutoUpdate
 								if (string.Compare(key, "res", StringComparison.CurrentCultureIgnoreCase) == 0)
 								{
 									AutoUpdateMgr.Instance.LocalResVersion = lines[i].Substring(idx + 1).Trim();
-								} else if (string.Compare(key, "fileList", StringComparison.OrdinalIgnoreCase) == 0)
+								} else if (string.Compare(key, "fileList", StringComparison.CurrentCultureIgnoreCase) == 0)
 								{
 									AutoUpdateMgr.Instance.LocalFileListContentMd5 = lines[i].Substring(idx + 1).Trim();
 								}
@@ -80,10 +82,8 @@ namespace AutoUpdate
 			var cfg = AutoUpdateMgr.Instance.LocalUpdateFile;
 			cfg.Clear();
 
-			string writePath = AutoUpdateMgr.Instance.WritePath;
-			string fileName = string.Format("{0}/{1}", writePath, AutoUpdateMgr._cUpdateTxt);
-			if (File.Exists(fileName))
-				cfg.LoadFromFile(fileName);
+			if (File.Exists(m_UpdateName))
+				cfg.LoadFromFile(m_UpdateName);
 		}
 
 		void ToNextState()
@@ -105,16 +105,108 @@ namespace AutoUpdate
 			
 			m_FileListName = string.Format("{0}/{1}", writePath, AutoUpdateMgr._cFileListTxt);
 			m_VersionName = string.Format("{0}/{1}", writePath, AutoUpdateMgr._cVersionTxt);
+			m_UpdateName = string.Format("{0}/{1}", writePath, AutoUpdateMgr._cUpdateTxt);
+
+			DoNextCopyVersion();
+		}
+
+		private void DoNextCopyVersion()
+		{
+			/*
+			if (!File.Exists(m_VersionName))
+				CopyVersion();
+			else
+				DoCopyFileList();
+			*/
+
+			// 不管如何都讀一次Version,因爲要判斷APK包的版本和可寫目錄的版本，是否一致
+			CopyVersion();
+		}
+
+		private void DoCopyFileList()
+		{
 			if (!File.Exists(m_FileListName))
 				CopyFileList();
 			else
+				ToNextState();
+		}
+
+		// 刪除所有可寫目錄文件
+		private void RemovePersistFiles()
+		{
+			// 刪除Update.txt裏的文件
+			if (File.Exists(m_UpdateName))
 			{
-				if (!File.Exists(m_VersionName))
-					CopyVersion();
-				else
-					ToNextState();
+				AutoUpdateCfgFile cfg = new AutoUpdateCfgFile();
+				cfg.LoadFromFile(m_UpdateName);
+				cfg.RemoveAllDowningFiles();
+				File.Delete(m_UpdateName);
 			}
 
+			// 刪除FileList裏的文件
+			if (File.Exists(m_FileListName))
+			{
+				ResListFile cfg = new ResListFile();
+				cfg.LoadFromFile(m_FileListName);
+				cfg.DeleteAllFiles();
+				File.Delete(m_FileListName);
+			}
+
+			// 刪除Version和FileList文件
+			if (File.Exists(m_VersionName))
+				File.Delete(m_VersionName);
+		}
+
+		private bool DoChecWriteNewVersion(byte[] pkgBuf)
+		{
+			if (pkgBuf == null || pkgBuf.Length <= 0)
+				return false;
+			
+			if (string.IsNullOrEmpty(m_VersionName))
+				return true;
+			if (!File.Exists(m_VersionName))
+				return true;
+
+			string str = string.Empty;
+			FileStream stream = new FileStream(m_VersionName, FileMode.Open, FileAccess.Read);
+			try
+			{
+				if (stream.Length <= 0)
+					return true;
+				byte[] buf = new byte[stream.Length];
+				stream.Read(buf, 0, buf.Length);
+				str = System.Text.Encoding.ASCII.GetString(buf);
+				if (string.IsNullOrEmpty(str))
+					return true;
+			} finally
+			{
+				stream.Close();
+				stream.Dispose();
+			}
+
+			string persistVer;
+			string persistMd5;
+			if (AutoUpdateMgr.Instance.GetResVer(str, out persistVer, out persistMd5))
+			{
+				string ss = System.Text.Encoding.ASCII.GetString(pkgBuf);
+				if (string.IsNullOrEmpty(ss))
+					return false;
+				string pkgVer;
+				string pkgMd5;
+				if (!AutoUpdateMgr.Instance.GetResVer(ss, out pkgVer, out pkgMd5))
+					return false;
+
+				int comp = string.Compare(pkgVer, persistVer, StringComparison.CurrentCultureIgnoreCase);
+
+				bool ret = comp > 0;
+
+				if (ret)
+					RemovePersistFiles();
+
+				return ret;
+			}
+
+			return true;
 		}
 
 		private void OnVersionLoaded(ITask task)
@@ -122,19 +214,23 @@ namespace AutoUpdate
 			if (task.IsOk)
 			{
 				WWWFileLoadTask t = task as WWWFileLoadTask;
-				FileStream stream = new FileStream(m_VersionName, FileMode.Create, FileAccess.Write);
-				try
+
+				if (DoChecWriteNewVersion(t.ByteData))
 				{
-					stream.Write(t.ByteData, 0, t.ByteData.Length);
-				} finally
-				{
-					stream.Close();
-					stream.Dispose();
-					stream = null;
+					FileStream stream = new FileStream(m_VersionName, FileMode.Create, FileAccess.Write);
+					try
+					{
+						stream.Write(t.ByteData, 0, t.ByteData.Length);
+					} finally
+					{
+						stream.Close();
+						stream.Dispose();
+						stream = null;
+					}
 				}
 			}
 
-			ToNextState();
+			DoCopyFileList();
 		}
 
 		private void OnFileListloaded(ITask task)
@@ -155,10 +251,7 @@ namespace AutoUpdate
 			}
 
 
-			if (!File.Exists(m_VersionName))
-				CopyVersion();
-			else
-				ToNextState();
+			ToNextState();
 		}
 	}
 

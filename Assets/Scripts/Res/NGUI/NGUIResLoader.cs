@@ -17,6 +17,10 @@ public class NGUIResLoader: BaseResLoader  {
 		Texture tex = ResourceMgr.Instance.LoadTexture(fileName, ResourceCacheType.rctRefAdd);
 		SetResource(uiTexture, tex, typeof(Texture), _cMainTex);
 		uiTexture.mainTexture = tex;
+		Material mat = uiTexture.material;
+		if (mat != null) {
+			mat.mainTexture = tex;
+		}
 
 		return tex != null;
 	}
@@ -89,13 +93,14 @@ public class NGUIResLoader: BaseResLoader  {
 		if (uiTexture == null || string.IsNullOrEmpty(fileName))
 			return false;
 
-		Material mat = ResourceMgr.Instance.LoadMaterial(fileName, ResourceCacheType.rctRefAdd);
-		SetResource(uiTexture, mat, typeof(Material));
-		if (mat != null)
-			//uiTexture.material = mat;
-			uiTexture.material = GameObject.Instantiate(mat);
-		else
+		Material mat;
+		int result = SetMaterialResource (uiTexture, fileName, out mat);
+		if (result == 0) {
 			uiTexture.material = null;
+			return false;
+		}
+		if (result == 2)
+			uiTexture.material = GameObject.Instantiate(mat);
 
 		return mat != null;
 	}
@@ -104,14 +109,15 @@ public class NGUIResLoader: BaseResLoader  {
 	{
 		if (uiSprite == null || string.IsNullOrEmpty(fileName))
 			return false;
-		Material mat = ResourceMgr.Instance.LoadMaterial(fileName, ResourceCacheType.rctRefAdd);
-		SetResource(uiSprite, mat, typeof(Material));
-
-		if (mat != null)
-			//uiSprite.material = mat;
-			uiSprite.material = GameObject.Instantiate(mat);
-		else
+		Material mat;
+		int result = SetMaterialResource (uiSprite, fileName, out mat);
+		if (result == 0) {
 			uiSprite.material = null;
+			return false;
+		}
+
+		if (result == 2)
+			uiSprite.material = GameObject.Instantiate(mat);
 
 		return mat != null;
 	}
@@ -286,16 +292,68 @@ public class NGUIResLoader: BaseResLoader  {
 	{
 		if (uiSprite == null || string.IsNullOrEmpty(fileName))
 			return false;
-		Material mat = ResourceMgr.Instance.LoadMaterial(fileName, ResourceCacheType.rctRefAdd);
-		SetResource(uiSprite, mat, typeof(Material));
+		Material mat;
+		int result = SetMaterialResource (uiSprite, fileName, out mat);
 
-		if (mat != null)
-			//uiSprite.material = mat;
-			uiSprite.material = GameObject.Instantiate(mat);
-		else
+		if (result == 0) {
 			uiSprite.material = null;
+			return false;
+		}
+
+		if (result == 2)
+			uiSprite.material = GameObject.Instantiate(mat);
 
 		return mat != null;
+	}
+
+	public bool LoadAltas(UISprite uiSprite, string fileName)
+	{
+			if (uiSprite == null || string.IsNullOrEmpty (fileName))
+				return false;
+
+			GameObject obj = ResourceMgr.Instance.LoadPrefab (fileName, ResourceCacheType.rctRefAdd);
+			if (obj == null) {
+				ClearResource<UIAtlas> (uiSprite);
+				uiSprite.atlas = null;
+				return false;
+			}
+
+			UIAtlas altas = obj.GetComponent<UIAtlas> ();
+			if (altas == null) {
+				ResourceMgr.Instance.DestroyObject (obj);
+				ClearResource<UIAtlas> (uiSprite);
+				uiSprite.atlas = null;
+				return false;
+			}
+
+			SetResource (uiSprite, obj, typeof(UIAtlas));
+			uiSprite.atlas = altas;
+			return altas != null;
+	}
+
+	public void ClearAtlas(ref UIAtlas target)
+	{
+		if (target == null)
+			return;
+		SetResource(target.GetInstanceID(), null, typeof(UIAtlas));
+		target = null;
+	}
+
+	public bool LoadAtlas(ref UIAtlas target, string fileName)
+	{
+			if (string.IsNullOrEmpty(fileName))
+				return false;
+			ClearAtlas(ref target);
+			GameObject obj = ResourceMgr.Instance.LoadPrefab (fileName, ResourceCacheType.rctRefAdd);
+			if (obj == null)
+				return false;
+			target = obj.GetComponent<UIAtlas> ();
+			if (target == null) {
+				ResourceMgr.Instance.DestroyObject (obj);
+				return false;
+			}
+			SetResource(target, obj, typeof(UIAtlas));
+			return true;
 	}
 }
 

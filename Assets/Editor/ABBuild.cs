@@ -11,6 +11,8 @@
 #define ASSETBUNDLE_ONLYRESOURCES
 #define USE_UNITY5_X_BUILD
 #define USE_HAS_EXT
+#define USE_DEP_BINARY
+#define USE_DEP_BINARY_AB
 
 using UnityEngine;
 using UnityEditor;
@@ -213,6 +215,40 @@ class AssetBunbleInfo: IDependBinary
         return ret;
     }
 
+	public AssetBunbleInfo(string fullPath, string[] fileNames)
+	{
+		Path = GetLocalPath(fullPath);
+		if (fileNames == null || fileNames.Length <= 0 || string.IsNullOrEmpty (Path))
+		{
+			FileType = AssetBundleFileType.abError;
+			FullPath = string.Empty;
+			return;
+		}
+
+		FileType = AssetBundleFileType.abDirFiles;
+		Path = Path.ToLower();
+		FullPath = fullPath.ToLower();
+
+		List<string> fileList = this.FileList;
+		for (int i = 0; i < fileNames.Length; ++i)
+		{
+			string fileName = fileNames[i];
+			if (!AssetBundleBuild.FileIsResource(fileName))
+				continue;
+			fileName = GetLocalPath(fileName);
+			if (string.IsNullOrEmpty(fileName))
+				continue;
+			fileList.Add(fileName.ToLower());
+		}
+
+		BuildDepends();
+		CheckIsScene();
+
+		Set_5_x_AssetBundleNames();
+
+		IsBuilded = false;
+	}
+
 	public AssetBunbleInfo(string fullPath)
 	{
 		Path = GetLocalPath(fullPath);
@@ -326,7 +362,7 @@ class AssetBunbleInfo: IDependBinary
 				string resFileName = AssetBundleBuild.GetXmlFileName(fileName);
 				if (string.IsNullOrEmpty(resFileName))
 					continue;
-				DependBinaryFile.ExportToSubFile(resFileName);
+				DependBinaryFile.ExportToSubFile(stream, resFileName);
 			}
 		}
 
@@ -344,7 +380,10 @@ class AssetBunbleInfo: IDependBinary
 					fileName = AssetBunbleInfo.Md5(filePath);
 				}
 
-				DependBinaryFile.ExportToDependFile(fileName, depCnt);
+				if (depCnt <= 0)
+					depCnt = 1;
+
+				DependBinaryFile.ExportToDependFile(stream, fileName, depCnt);
 			}	
 		}
 
@@ -1092,6 +1131,233 @@ class AssetBundleMgr
 		set;
 	}
 
+	private bool GetSplitABCnt(string dir, out int cnt)
+	{
+		cnt = 0;
+		if (string.IsNullOrEmpty(dir))
+			return false;
+		string dirName = Path.GetFileName(dir);
+		if (dirName.StartsWith("["))
+		{
+			int idx = dirName.IndexOf(']');
+			if (idx <= 1)
+				return false;
+			string numStr = dirName.Substring(1, idx - 1);
+			int num;
+			if (int.TryParse(numStr, out num) && num > 0)
+			{
+				cnt = num;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private bool IsSplitABDir(string dir)
+	{
+		int num;
+		return GetSplitABCnt(dir, out num);
+	}
+
+	private void BuildSplitABDir(string splitDir, ABLinkFileCfg cfg)
+	{
+		if (cfg == null || string.IsNullOrEmpty(splitDir))
+			return;
+		string[] files = Directory.GetFiles(splitDir, "*.*", SearchOption.TopDirectoryOnly);
+		if (files == null || files.Length <= 0)
+			return;
+
+		int maxCnt;
+		if (!GetSplitABCnt(splitDir, out maxCnt) || maxCnt <= 0)
+			return;
+
+		List<string> resFiles = new List<string>();
+		for (int i = 0; i < files.Length; ++i)
+		{
+			string fileName = files[i];
+			if (AssetBundleBuild.FileIsResource(fileName))
+				resFiles.Add(fileName);
+		}
+
+		if (resFiles.Count <= 0)
+			return;
+
+		// 查找最合适的
+		int idx = splitDir.IndexOf(']');
+		string subDir = splitDir.Substring(idx + 1).Trim();
+		if (string.IsNullOrEmpty(subDir))
+			return;
+
+		splitDir = AssetBunbleInfo.GetLocalPath(splitDir);
+
+		int curIdx = 0;
+		while (true)
+		{
+			string dstDir = string.Format("{0}/@{1}{2:D}", splitDir, subDir, curIdx);
+			int curCnt;
+			if (cfg.GetDstDirCnt(dstDir, out curCnt))
+			{
+				if (curCnt < maxCnt)
+					break;
+			} else
+				break;
+
+			++curIdx;
+		}
+
+		for (int i = 0; i < resFiles.Count; ++i)
+		{
+			string srcFileName = AssetBunbleInfo.GetLocalPath(resFiles[i]);
+			if (cfg.ContainsLink(srcFileName))
+				continue;
+
+			string dstDir = string.Format("{0}/@{1}{2:D}", splitDir, subDir, curIdx);
+			int curCnt;
+
+			while (true)
+			{
+				if (!cfg.GetDstDirCnt(dstDir, out curCnt))
+				{
+					curCnt = 0;
+					break;
+				}
+				if (curCnt + 1 > maxCnt)
+				{
+					++curIdx;
+					dstDir = string.Format("{0}/@{1}{2:D}", splitDir, subDir, curIdx);
+				} else
+					break;
+			}
+
+
+			string dstFileName = string.Format("{0}/{1}", dstDir, Path.GetFileName(srcFileName));
+			cfg.AddLink(srcFileName, dstFileName);
+			++curCnt;
+		}
+
+		Dictionary<string, List<string>> dirFileMap = new Dictionary<string, List<string>>();
+		var iter = cfg.GetIter();
+		while (iter.MoveNext())
+		{
+			string dstFileName = iter.Current.Value;
+			string dstDir = Path.GetDirectoryName(dstFileName);
+			if (dirFileMap.ContainsKey(dstDir))
+				dirFileMap[dstDir].Add(iter.Current.Key);
+			else
+			{
+				List<string> list = new List<string>();
+				list.Add(iter.Current.Key);
+				dirFileMap.Add(dstDir, list);
+			}
+		}
+		iter.Dispose();
+
+		var dirIter = dirFileMap.GetEnumerator();
+		while (dirIter.MoveNext())
+		{
+            string path = AssetBunbleInfo.GetLocalPath(dirIter.Current.Key).ToLower();
+            if (mAssetBundleMap.ContainsKey(path))
+                continue;
+            var list = dirIter.Current.Value;
+			// 排个序
+			list.Sort();
+			string[] fileNames = list.ToArray();
+			string fullPath = Path.GetFullPath(path);
+			AssetBunbleInfo ab = new AssetBunbleInfo(fullPath, fileNames);
+			mAssetBundleMap.Add(path, ab);
+			mAssetBundleList.Add(ab);
+		}
+		dirIter.Dispose();
+	}
+
+	private void BuildSplitABDirs(HashSet<string> splitABDirs)
+	{
+		if (splitABDirs == null || splitABDirs.Count <= 0)
+			return;
+
+		string abSplitCfgFileName = Path.GetFullPath("buildABSplit.cfg");
+		ABLinkFileCfg abLinkCfg = new ABLinkFileCfg();
+		if (File.Exists(abSplitCfgFileName))
+		{
+			abLinkCfg.LoadFromFile(abSplitCfgFileName);
+		}
+		var abSplitIter = splitABDirs.GetEnumerator();
+		while (abSplitIter.MoveNext())
+		{
+			BuildSplitABDir(abSplitIter.Current, abLinkCfg);
+			EditorUtility.UnloadUnusedAssetsImmediate();
+		}
+		abSplitIter.Dispose();
+
+		abLinkCfg.SaveToFile(abSplitCfgFileName);
+	}
+
+#if USE_UNITY5_X_BUILD
+
+	private void CheckRongYuRes(AssetBunbleInfo info)
+	{
+		if (info == null)
+			return;
+		for (int i = 0; i < info.SubFileCount; ++i)
+		{
+			string subFileName = info.GetSubFiles(i);
+			string[] depFileList = AssetDatabase.GetDependencies(subFileName, false);
+			if (depFileList == null || depFileList.Length <= 0)
+				continue;
+			for (int j = 0; j < depFileList.Length; ++j)
+			{
+				string depFileName = depFileList[j];
+
+				if (!AssetBundleBuild.FileIsResource(depFileName))
+					continue;
+
+				bool isFound = false;
+				for (int k = 0; k < info.SubFileCount; ++k)
+				{
+					if (string.Compare(depFileName, info.GetSubFiles(k), true) == 0)
+					{
+						isFound = true;
+						break;
+					}
+				}
+
+				if (isFound)
+					continue;
+
+				AssetImporter importer = AssetImporter.GetAtPath(depFileName);
+				if (importer == null)
+					continue;
+
+				isFound = !string.IsNullOrEmpty(importer.assetBundleName);
+
+				if (!isFound)
+				{
+					// 打印出来
+					Debug.LogFormat("<color=yellow>[{0}]</color><color=white>依赖被额外包含</color><color=red>{1}</color>", 
+						info.BundleFileName, depFileName);
+				}
+			}
+		}
+	}
+
+	// 打印未被打包但引用的资源
+	private void CheckRongYuRes()
+	{
+		if (mAssetBundleList == null || mAssetBundleList.Count <= 0)
+			return;
+		for (int i = 0; i < mAssetBundleList.Count; ++i)
+		{
+			AssetBunbleInfo info = mAssetBundleList[i];
+			if (info == null)
+				continue;
+			CheckRongYuRes(info);
+			EditorUtility.UnloadUnusedAssetsImmediate();
+		}
+	}
+
+#endif
+
 	// 生成
 	public void BuildDirs(List<string> dirList)
 	{
@@ -1103,11 +1369,35 @@ class AssetBundleMgr
 		List<string> abFiles = new List<string> ();
 		HashSet<string> NotUsedDirHash = new HashSet<string> ();
         string notUsedSplit = "/" + AssetBundleBuild._NotUsed;
+		// 需要分割的目錄
+		HashSet<string> splitABDirs = new HashSet<string>();
 		for (int i = 0; i < dirList.Count; ++i) {
 			string dir = dirList[i];
 
 			if (NotUsedDirHash.Contains(dir))
 				continue;
+
+			if (IsSplitABDir(dir))
+			{
+				// 分割的對象
+				if (!splitABDirs.Contains(dir))
+				{
+					string[] files = System.IO.Directory.GetFiles(dir);
+					if (files != null && files.Length > 0)
+					{
+						for (int j = 0; j < files.Length; ++j)
+						{
+							string fileName = files[j];
+							if (AssetBundleBuild.FileIsResource(fileName))
+							{
+								splitABDirs.Add(dir);
+								break;
+							}
+						}
+					}
+				}
+				continue;
+			}
 
             string abDir = dir;
             int notUsedIdx = abDir.IndexOf(notUsedSplit);
@@ -1161,7 +1451,12 @@ class AssetBundleMgr
 			}
 		}
 
-		RefreshAllDependCount ();
+		// 加入Split的AB LINK
+		BuildSplitABDirs(splitABDirs);
+
+        EditorUtility.ClearProgressBar();
+
+        RefreshAllDependCount ();
 
 		mAssetBundleList.Sort (AssetBunbleInfo.OnSort);
 #if USE_UNITY5_X_BUILD
@@ -1347,21 +1642,30 @@ class AssetBundleMgr
 		EditorUserBuildSettings.activeBuildTargetChanged -= OnBuildTargetChanged;
 		ProcessBuild_5_x(m_TempExportDir, m_TempCompressType, m_TempBuildTarget);
 	}
+
+	private AssetBundleManifest CallBuild_5_x_API(string exportDir, int compressType, BuildTarget target, bool isReBuild = true)
+	{
+		BuildAssetBundleOptions buildOpts = BuildAssetBundleOptions.DisableWriteTypeTree |
+			BuildAssetBundleOptions.DeterministicAssetBundle;
+		
+		if (isReBuild)
+			buildOpts |= BuildAssetBundleOptions.ForceRebuildAssetBundle;
+		if (compressType == 0)
+			buildOpts |= BuildAssetBundleOptions.UncompressedAssetBundle;
+	#if UNITY_5_3 || UNITY_5_4
+		else if (compressType == 2)
+			buildOpts |= BuildAssetBundleOptions.ChunkBasedCompression;
+	#endif
+
+		AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(exportDir, buildOpts, target);
+		EditorUtility.UnloadUnusedAssetsImmediate();
+
+		return manifest;
+	}
 	
 	void ProcessBuild_5_x(string exportDir, int compressType, BuildTarget target)
 	{
-		BuildAssetBundleOptions buildOpts = BuildAssetBundleOptions.DisableWriteTypeTree |
-											BuildAssetBundleOptions.DeterministicAssetBundle |
-											BuildAssetBundleOptions.ForceRebuildAssetBundle; // 永远重新打包
-		if (compressType == 0)
-			buildOpts |= BuildAssetBundleOptions.UncompressedAssetBundle;
-#if UNITY_5_3 || UNITY_5_4
-		else if (compressType == 2)
-			buildOpts |= BuildAssetBundleOptions.ChunkBasedCompression;
-#endif
-		
-		AssetBundleManifest manifest = BuildPipeline.BuildAssetBundles(exportDir, buildOpts, target);
-		EditorUtility.UnloadUnusedAssetsImmediate();
+		AssetBundleManifest manifest = CallBuild_5_x_API(exportDir, compressType, target);
 		
 		for (int i = 0; i < mAssetBundleList.Count; ++i)
 		{
@@ -1400,83 +1704,13 @@ class AssetBundleMgr
 		
 #endif
 	}
-	
-	private void BuildAssetBundleInfo_5_x(AssetBunbleInfo info, eBuildPlatform platform, string exportDir, int compressType)
-    {
-#if USE_UNITY5_X_BUILD
-        if ((info == null) || (info.IsBuilded) || string.IsNullOrEmpty(exportDir) || (info.FileType == AssetBundleFileType.abError) || (info.SubFileCount <= 0))
-            return;
-        BuildTarget target = BuildTarget.Android;
-        if (!GetBuildTarget(platform, ref target))
-            return;
-        /*
-         * Unity 5.x始终启动：
-         *      CollectDependencies
-         *      CompleteAssets
-         *      DeterministicAssetBundle
-         */
-
-        string localOutFileName = info.BundleFileName;
-		string outFileName = string.Format("{0}/{1}", exportDir, localOutFileName);
-
-        if (info.IsScene)
-        {
-            // 场景打包
-            string[] fileArr = info.GetSubFiles();
-            if (fileArr == null)
-            {
-                string errStr = string.Format("AssetBundle [{0}] Subfiles is empty", info.Path);
-                Debug.LogError(errStr);
-                return;
-            }
-
-            BuildOptions buildOpts = BuildOptions.BuildAdditionalStreamedScenes;
-            if (compressType != 1)
-                buildOpts |= BuildOptions.UncompressedAssetBundle;
-        //    BuildPipeline.BuildStreamedSceneAssetBundle(fileArr, outFileName, target, buildOpts); 
-            BuildPipeline.BuildPlayer(fileArr, outFileName, target, buildOpts);
-            info.IsBuilded = true;
-            info.CompressType = compressType;
-            return;
-        } else
-        {
-            // 非场景资源打包
-            localOutFileName = GetAssetRelativePath(localOutFileName);
-
-            UnityEditor.AssetBundleBuild[] builders = new UnityEditor.AssetBundleBuild[1];
-			builders[0].assetBundleName = localOutFileName;
-          //  builders[0].assetBundleName = System.IO.Path.GetFileNameWithoutExtension(localOutFileName);
-			//builders[0].assetBundleVariant = "assets";
-            
-            List<string> assetNameList = new List<string>();
-            assetNameList.AddRange(info.GetSubFiles());
-            // 5.x打包需要把脚本也弄上去。。。
-            if (info.ScriptFileCount > 0)
-                assetNameList.AddRange(info.GetScriptFileNames());
-
-            builders[0].assetNames = assetNameList.ToArray();
-            //builders[0].assetNames = info.GetSubFiles();
-
-            BuildAssetBundleOptions buildOpts = BuildAssetBundleOptions.DisableWriteTypeTree |
-                                                BuildAssetBundleOptions.DeterministicAssetBundle |
-                                                BuildAssetBundleOptions.ForceRebuildAssetBundle; // 永远重新打包
-			if (compressType != 1)
-				buildOpts |= BuildAssetBundleOptions.UncompressedAssetBundle;
-
-            BuildPipeline.BuildAssetBundles(exportDir, builders, buildOpts, target);
-
-			info.IsBuilded = true;
-			info.CompressType = compressType;
-        }
-#endif
-    }
 
     public static string GetAssetRelativePath(string fullPath)
     {
         if (string.IsNullOrEmpty(fullPath))
             return string.Empty;
         fullPath = fullPath.Replace("\\", "/");
-        int index = fullPath.IndexOf("Assets/");
+        int index = fullPath.IndexOf("Assets/", StringComparison.CurrentCultureIgnoreCase);
         if (index < 0)
             return fullPath;
         string ret = fullPath.Substring(index);
@@ -1626,21 +1860,6 @@ class AssetBundleMgr
 		}
 	}
 
-	private void ExportBinarys(Stream stream, bool isMd5, string outPath)
-	{
-		if (stream == null)
-			return;
-
-		int abFileCount = mAssetBundleList == null ? 0: mAssetBundleList.Count;
-		DependBinaryFile.ExportFileHeader(stream, abFileCount, DependBinaryFile.FLAG_UNCOMPRESS);
-
-		for (int i = 0; i < mAssetBundleList.Count; ++i) {
-			AssetBunbleInfo info = mAssetBundleList[i];
-			if ((info != null) && info.IsBuilded)
-				info.ExportBinary(stream, isMd5, outPath);
-		}
-	}
-
 	private void ExportXmlStr(StringBuilder builder, bool isMd5, string outPath)
 	{
 		if (builder == null)
@@ -1651,6 +1870,38 @@ class AssetBundleMgr
 			if ((info != null) && info.IsBuilded)
                 info.ExportXml(builder, isMd5, outPath);
 		}
+	}
+
+	// 导出二进制
+	private void ExportBinarys(string exportPath, bool isMd5)
+	{
+		if (string.IsNullOrEmpty (exportPath))
+			return;
+		string fullPath = Path.GetFullPath (exportPath);
+		if (string.IsNullOrEmpty (fullPath))
+			return;
+		#if USE_DEP_BINARY_AB
+		string fileName = "Assets/AssetBundles.xml";
+		#else
+		string fileName = string.Format ("{0}/AssetBundles.xml", fullPath);
+		#endif
+		if (System.IO.File.Exists (fileName)) {
+			System.IO.File.Delete(fileName);
+		}
+
+		FileStream stream = new FileStream (fileName, FileMode.Create);
+
+		int abFileCount = mAssetBundleList == null ? 0: mAssetBundleList.Count;
+		DependBinaryFile.ExportFileHeader(stream, abFileCount, DependBinaryFile.FLAG_UNCOMPRESS);
+
+		for (int i = 0; i < mAssetBundleList.Count; ++i) {
+			AssetBunbleInfo info = mAssetBundleList[i];
+			if ((info != null) && info.IsBuilded)
+				info.ExportBinary(stream, isMd5, fullPath);
+		}
+
+		stream.Close ();
+		stream.Dispose ();
 	}
 
 	// export xml
@@ -2032,6 +2283,18 @@ class AssetBundleMgr
         string exportDir = CreateAssetBundleDir(platform, outPath);
         if (mAssetBundleList.Count > 0)
         {
+
+		#if USE_DEP_BINARY && USE_DEP_BINARY_AB
+			AssetImporter xmlImport = AssetImporter.GetAtPath("Assets/AssetBundles.xml");
+			if (xmlImport != null)
+			{
+				if (!string.IsNullOrEmpty(xmlImport.assetBundleName))
+				{
+					xmlImport.assetBundleName = string.Empty;
+					xmlImport.SaveAndReimport();
+				}
+			}
+		#endif
 			/*
             for (int i = 0; i < mAssetBundleList.Count; ++i)
             {
@@ -2041,17 +2304,58 @@ class AssetBundleMgr
             }*/
 			BuildAssetBundlesInfo_5_x(platform, exportDir, compressType);
 
+			// 是否存在冗余资源，如果有打印出来
+			CheckRongYuRes();
+
+		#if USE_DEP_BINARY
+			// 二进制格式
+			ExportBinarys(exportDir, isMd5);
+		#else
             // export xml
             ExportXml(exportDir, isMd5);
+		#endif
+			
+            AssetDatabase.Refresh();
+
+		#if USE_DEP_BINARY && USE_DEP_BINARY_AB
+			BuildTarget target = BuildTarget.Android;
+			if (GetBuildTarget(platform, ref target))
+			{
+				if (xmlImport == null)
+					xmlImport = AssetImporter.GetAtPath("Assets/AssetBundles.xml");
+				if (xmlImport != null)
+				{
+					xmlImport.assetBundleName = "AssetBundles.xml";
+					xmlImport.SaveAndReimport();
+		#if UNITY_5_3 || UNITY_5_4
+					CallBuild_5_x_API(exportDir, compressType, target, false);
+		#else
+					CallBuild_5_x_API(exportDir, 0, target,  false);
+		#endif
+
+					AssetDatabase.Refresh();
+
+					string xmlSrcFile = string.Format("{0}/assetbundles.xml", exportDir);
+					if (File.Exists(xmlSrcFile))
+					{
+						string xmlDstFile = string.Format("{0}/AssetBundles.xml", exportDir);
+						File.Move(xmlSrcFile, xmlDstFile);
+						AssetDatabase.Refresh();
+					}
+				}
+			}
+
+		#endif
+			
+			RemoveBundleManifestFiles_5_x(exportDir);
 
 			if (isMd5)
 			{
 				ProcessVersionRes(exportDir, platform);
 				ChangeBundleFileNameToMd5(exportDir);
 			}
-			RemoveBundleManifestFiles_5_x(exportDir);
 
-            AssetDatabase.Refresh();
+			AssetDatabase.Refresh();
 
             ResetAssetBundleInfo();
         }
@@ -2112,8 +2416,14 @@ class AssetBundleMgr
 				BuildPipeline.PopAssetDependencies();
 			}
 
+			#if USE_DEP_BINARY
+			// 二进制格式
+			ExportBinarys(exportDir, isMd5);
+			#else
 			// export xml
 			ExportXml(exportDir, isMd5);
+			#endif
+
 			if (isMd5)
 			{
 				ProcessVersionRes(exportDir, platform);
@@ -2226,14 +2536,14 @@ public static class AssetBundleBuild
 													 ".txt", ".bytes", ".xml", ".csv", ".json",
 													 ".controller", ".shader", ".anim", ".unity", ".mat",
 													 ".wav", ".mp3", ".ogg",
-													 ".shadervariants"};
+													 ".shadervariants", ".asset"};
 	
 	private static readonly string[] ResourceXmlExts = {".prefab", ".fbx",
 														".tex", ".tex",  ".tex", ".tex", ".tex", ".tex", ".tex",
 														".bytes", ".bytes", ".bytes", ".bytes", ".bytes",
 														".controller", ".shader", ".anim", ".unity", ".mat",
 														".audio", ".audio", ".audio",
-														".shaderVar"};
+														".shaderVar", ".asset"};
 
 	private static readonly Type[] ResourceExtTypes = {
 														typeof(UnityEngine.GameObject), typeof(UnityEngine.GameObject),
@@ -2241,7 +2551,7 @@ public static class AssetBundleBuild
 														typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset),
 														typeof(UnityEngine.Object), typeof(UnityEngine.Shader), typeof(UnityEngine.AnimationClip), null, typeof(UnityEngine.Material),
 														typeof(UnityEngine.AudioClip), typeof(UnityEngine.AudioClip), typeof(UnityEngine.AudioClip),
-														typeof(UnityEngine.ShaderVariantCollection)
+														typeof(UnityEngine.ShaderVariantCollection), typeof(UnityEngine.ScriptableObject)
 	};
 
 	private static readonly string[] _DirSplit = {"\\"};
@@ -2564,6 +2874,34 @@ public static class AssetBundleBuild
 		ret.Sort (OnDirSort);
 		return ret;
 	}*/
+
+	private static List<string> GetResAllDirPath(List<string> rootDir)
+		{
+			if (rootDir == null || rootDir.Count <= 0)
+				return null;
+			List<string> ret = null;
+			for (int i = 0; i < rootDir.Count; ++i) {
+				List<string> list = AssetBundleBuild.GetAllLocalSubDirs (rootDir [i]);
+				if (list != null && list.Count > 0)
+				{
+					if (ret == null)
+						ret = new List<string>();
+					ret.AddRange (list);
+				}
+
+				if (DirExistResource(rootDir[i]))
+				{
+					if (ret == null)
+						ret = new List<string>();
+					ret.Add(rootDir[i]);
+				}
+			}
+
+			if (ret != null)
+				ret.Sort(OnDirSort);
+
+			return ret;
+		}
 
 	private static List<string> GetResAllDirPath()
 	{
@@ -3155,7 +3493,19 @@ public static class AssetBundleBuild
 	static public void Cmd_BuildAPK_Lz4() {
 		Cmd_Build(2, true, eBuildPlatform.eBuildAndroid);
 	}
+
+	[MenuItem("Assets/发布/APK_Debug(Lz4)")]
+	static public void Cmd_BuildAPK_Debug_Lz4()
+	{
+		Cmd_Build(2, true, eBuildPlatform.eBuildAndroid, true);
+	}
 #endif
+
+	[MenuItem("Assets/发布/APK_Debug(非压缩)")]
+	static public void Cmd_BuildAPK_DEBUG_UNCOMPRESS()
+	{
+		Cmd_Build(0, true, eBuildPlatform.eBuildAndroid, true);
+	}
 
 	public static void RunCmd(string command)
 	{
@@ -3165,6 +3515,9 @@ public static class AssetBundleBuild
 #if UNITY_EDITOR_WIN
 		command = " /c " + command;
 		processCommand("cmd.exe", command);
+#elif UNITY_EDITOR_MAC
+            command = " -al " + command;
+            processCommand("ls", command);
 #endif
 	}
 
@@ -3247,9 +3600,71 @@ public static class AssetBundleBuild
 		}
 	} 
 
-	static private void Cmd_SvnOther(string outPath, List<string> resPaths)
+	static private void Cmd_Svn(string outPath, List<string> resPaths)
 	{
+		if (string.IsNullOrEmpty (outPath) || resPaths == null || resPaths.Count <= 1)
+				return;
+			string url = resPaths [0].Trim ();
+			if (string.IsNullOrEmpty (url))
+				return;
+			
+			// SVN更新
+			for (int i = 1; i < resPaths.Count; ++i) {
+				string path = string.Format ("{0}/{1}", outPath, resPaths [i]);
+				path = Path.GetFullPath (path);
+				if (Directory.Exists (path)) {
+					// svn update
+					#if UNITY_EDITOR_WIN
+					string cmd = string.Format("TortoiseProc.exe /command:update /path:\"{0}\" /closeonend:3", path);
+					RunCmd(cmd);
+					#endif
+				} else {
+					// svn checkout
+					#if UNITY_EDITOR_WIN
+					string cmd = string.Format("TortoiseProc.exe /command:checkout /path:\"{0}\" /url:\"{1}/{2}\"", path, url, resPaths[i]);
+					RunCmd(cmd);
+					#endif
+				}
+			}
 	}
+
+	static private void Cmd_CopyList(string outPath, List<string> copyList)
+		{
+			if (string.IsNullOrEmpty(outPath) || copyList == null || copyList.Count <= 0)
+				return;
+
+			string dstAssets = outPath + '/' + "Assets";
+			if (!System.IO.Directory.Exists(dstAssets)) {
+				if (System.IO.Directory.CreateDirectory(dstAssets) == null)
+					return;
+			}
+
+			for (int i = 0; i < copyList.Count; ++i) {
+				string dir = copyList [i];
+				string dstDir = Path.GetFullPath(outPath + '/' + dir);
+				if (Directory.Exists (dstDir)) {
+					var subDirs = System.IO.Directory.GetDirectories (dstDir);
+					if (subDirs != null) {
+						for (int j = 0; j < subDirs.Length; ++j) {
+							System.IO.Directory.Delete (subDirs [j], true);
+						}
+					}
+
+					var subFiles = System.IO.Directory.GetFiles (dstDir);
+					if (subFiles != null) {
+						for (int j = 0; j < subFiles.Length; ++j) {
+							System.IO.File.Delete (subFiles [j]);
+						}
+					}
+				}
+
+				dir = dir.Replace('\\', '/');
+				_CopyAllDirs(dir, dstAssets, null);
+			}
+
+			dstAssets = outPath + '/' + "ProjectSettings";
+			_CopyAllFiles("ProjectSettings", dstAssets, null);
+		}
 
     // 拷贝非资源文件夹
     // resPaths: 资源目录列表

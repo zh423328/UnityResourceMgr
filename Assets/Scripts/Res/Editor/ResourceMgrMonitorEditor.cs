@@ -223,9 +223,87 @@ public class ResourceMgrMonitorEditor: Editor
 		if (!Application.isPlaying)
 			return;
 
-		bool isChg = UpdateAssetRefMap();
-		if (isChg)
-			this.Repaint();
+		float curTime = Time.unscaledTime;
+		m_IsUPdateData = curTime - m_LastUpdateTime > 0.25f;
+		
+		if (m_IsUPdateData)
+			m_LastUpdateTime = curTime;
+
+			if (m_IsUPdateData) {
+				bool isChg = UpdateAssetRefMap ();
+				
+			int cnt = TimerMgr.Instance.TimerPoolCount;
+			if (cnt != m_LastTimeCnt)
+			{
+				m_LastTimeCnt = cnt;
+				isChg = true;
+			}
+
+			cnt = ResourceAssetCache.GetPoolCount();
+			if (cnt != m_LastResCacheCnt)
+			{
+				m_LastResCacheCnt = cnt;
+				isChg = true;
+			}
+
+			cnt = AssetBundleCache.GetPoolCount();
+			if (cnt != m_LastBundleCacheCnt)
+			{
+				m_LastBundleCacheCnt = cnt;
+				isChg = true;
+			}
+
+			#if UNITY_5_3 || UNITY_5_4
+			cnt = BundleCreateAsyncTask.GetPoolCount();
+			if (cnt != m_LastBundleCreateCnt)
+			{
+				m_LastBundleCreateCnt = cnt;
+				isChg = true;
+			}
+			#endif
+
+			cnt = WWWFileLoadTask.GetPoolCount();
+			if (cnt != m_LastWWWCreateCnt)
+			{
+				m_LastWWWCreateCnt = cnt;
+				isChg = true;
+			}
+
+				if (isChg)
+					this.Repaint ();
+			}
+	}
+
+	void DrawObjectPoolInfos()
+	{
+		EditorGUILayout.Space();
+		EditorGUILayout.Space();
+
+		EditorGUILayout.LabelField("對象池列表");
+
+		EditorGUILayout.LabelField("TimerMgr Pool");
+		EditorGUILayout.IntField(m_LastTimeCnt);
+
+		EditorGUILayout.Space();
+		EditorGUILayout.LabelField("ResourcesCache Pool");
+		EditorGUILayout.IntField(m_LastResCacheCnt);
+
+		EditorGUILayout.Space();
+		EditorGUILayout.LabelField("AssetBundleCache Pool");
+		EditorGUILayout.IntField(m_LastBundleCacheCnt);
+
+		#if UNITY_5_3 || UNITY_5_4
+		EditorGUILayout.Space();
+		EditorGUILayout.LabelField("BundleCreateAsyncTask Pool");
+		EditorGUILayout.IntField(m_LastBundleCreateCnt);
+		#endif
+
+		EditorGUILayout.Space();
+		EditorGUILayout.LabelField("WWWFileLoadTask Pool");
+		EditorGUILayout.IntField(m_LastWWWCreateCnt);
+
+		EditorGUILayout.Space();
+		EditorGUILayout.Space();
 	}
 
 	public override void OnInspectorGUI ()
@@ -235,6 +313,8 @@ public class ResourceMgrMonitorEditor: Editor
 		if (Application.isPlaying) {
 
 			DrawSearchTarget();
+
+			DrawObjectPoolInfos();
 
 			// 正在使用列表
 			DrawCacheMap(mUsedAssetRefMap, "正在使用列表");
@@ -313,4 +393,12 @@ public class ResourceMgrMonitorEditor: Editor
 	private Dictionary<string, int> mUsedAssetRefMap = new Dictionary<string, int>();
 	private Dictionary<string, int> mNotUsedAssetRefMap = new Dictionary<string, int>();
 	static private GameObject mShowTarget = null;
+	private float m_LastUpdateTime = 0;
+	private bool m_IsUPdateData = false;
+
+	private int m_LastTimeCnt = 0;
+	private int m_LastResCacheCnt = 0;
+	private int m_LastBundleCacheCnt = 0;
+	private int m_LastBundleCreateCnt = 0;
+	private int m_LastWWWCreateCnt = 0;
 }
