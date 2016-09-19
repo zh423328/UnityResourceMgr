@@ -50,6 +50,28 @@ namespace Utils
             m_objStack.Push(obj);
         }
 
+		// 少用，调用这个池的作用就没有了
+		public void Clear() {
+			if (m_objStack != null)
+				m_objStack.Clear();
+		}
+
+		public int Count
+		{
+			get
+			{
+				if (m_objStack == null)
+					return 0;
+				return m_objStack.Count;
+			}
+		}
+
+		public Stack<T>.Enumerator GetIter() {
+			if (m_objStack == null)
+				return new Stack<T>.Enumerator();
+			return m_objStack.GetEnumerator();
+		}
+
         private Stack<T> m_objStack = null;
         private Action<T> m_resetAction = null;
         private CreateFunc m_createFunc = null;

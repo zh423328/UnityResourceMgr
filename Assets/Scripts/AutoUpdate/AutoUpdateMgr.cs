@@ -429,7 +429,7 @@ namespace AutoUpdate
 				OnDownloadFileEvt(idx, readBytes, isDone);
 		}*/
 
-		private bool GetResVer(string content, out string ver, out string fileListMd5)
+		internal bool GetResVer(string content, out string ver, out string fileListMd5)
 		{
 			ver = string.Empty;
 			fileListMd5 = string.Empty;
@@ -475,7 +475,7 @@ namespace AutoUpdate
 
 		internal void UpdateToUpdateTxt(ResListFile.ResDiffInfo[] newInfos)
 		{
-			if (newInfos == null)
+			if (newInfos == null || m_UpdateFile == null)
 				return;
 			if (newInfos.Length <= 0)
 			{
