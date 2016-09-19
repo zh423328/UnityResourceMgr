@@ -11,9 +11,12 @@ using UnityEngine;
 
 public enum ResourceCacheType
 {
-	rctNone = 0, // xiao xin shi yong
-	rctTemp,
-	rctRefAdd
+    //使用后立即删除，即在读取AB数据后，下一帧AssetBundle.Unload(true), 常用于读取配置，文本用（ResourceMgr.Instance.LoadText, ResourceMgr.Instance.LoadBytes
+    rctNone = 0, // xiao xin shi yong
+     //读取的对象会放入AssetCacheMgr，进行缓存，但并不会对资源引用计数+1，一般不建议外部使用这个参数，内部库中在LoadPrefab后，立即GameObject.instance时使用
+    rctTemp,
+   // 读取的对象会放入AssetCacheMgr进行缓存，并且会对资源进行引用计数+1，外部调用常用类型，切记使用这个参数加载的对象，要使用ResourceMgr.Instance.DestroyObject删除对象（把这个类型读取出来的对象，看做是C++的指针，需要手动调用）
+    rctRefAdd
 }
 
 public abstract class IResourceLoader
