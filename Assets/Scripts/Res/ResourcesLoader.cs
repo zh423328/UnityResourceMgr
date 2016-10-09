@@ -102,6 +102,32 @@ public class ResourceAssetCache: AssetCache
 		}
 	}
 
+	internal Sprite[] Sprites
+	{
+		get
+		{
+			return mSprites;
+		}
+
+		set
+		{
+			if (mSprites == value)
+				return;
+
+			if (mSprites != null)
+			{
+				for (int i = 0; i < mSprites.Length; ++i)
+				{
+					Sprite sp = mSprites[i];
+					if (sp != null)
+						Resources.UnloadAsset(sp);
+				}
+			}
+
+			mSprites = value;
+		}
+	}
+
 	public static int GetPoolCount()
 	{
 		return m_Pool.Count;
@@ -119,6 +145,8 @@ public class ResourceAssetCache: AssetCache
 			loader.OnCacheDestroy(this);
 		
         mTarget = null;
+		mSprites = null;
+		
 		mFileName = string.Empty;
         if (m_PoolUsed)
         {
@@ -162,7 +190,9 @@ public class ResourceAssetCache: AssetCache
 				//	LogMgr.Instance.LogWarning("ResourceAssetCache OnUnLoad: GameObject is not UnLoad in EditorMode!");
 				//GameObject.DestroyImmediate(mTarget, true);
 			}
+
 			mTarget = null;
+			this.Sprites = null;
 		}
 
 		mFileName = string.Empty;
@@ -201,6 +231,7 @@ public class ResourceAssetCache: AssetCache
 	private UnityEngine.Object mTarget = null;
 	private bool mIsGameObject = false;
 	private string mFileName = string.Empty;
+	private Sprite[] mSprites = null;
 
 	// 缓冲池
 	private static bool m_PoolUsed = true;
@@ -233,9 +264,13 @@ public class ResourcesLoader: IResourceLoader
 		return false;
 	}
 
-	private void AddRefSprites(AssetCache cache, Sprite[] sprites, ResourceCacheType cacheType) {
+	private void AddRefSprites(ResourceAssetCache cache, Sprite[] sprites, ResourceCacheType cacheType) {
 		if (cache == null || sprites == null || sprites.Length <= 0)
 			return;
+
+		// 设置一次
+		cache.Sprites = sprites;
+
 		if (cacheType != ResourceCacheType.rctNone) {
 			if (cacheType == ResourceCacheType.rctRefAdd)
 				AssetCacheManager.Instance._AddOrUpdateUsedList(cache, sprites.Length);
@@ -464,6 +499,16 @@ public class ResourcesLoader: IResourceLoader
 		return LoadObjectAsync<Texture> (fileName, cacheType, onProcess);
 	}
 
+	public override Font LoadFont (string fileName, ResourceCacheType cacheType)
+	{
+		return LoadObject<Font> (fileName, cacheType);
+	}
+
+	public override bool LoadFontAsync (string fileName, ResourceCacheType cacheType, Action<float, bool, Font> onProcess)
+	{
+		return LoadObjectAsync<Font> (fileName, cacheType, onProcess);
+	}
+
 	public override RuntimeAnimatorController LoadAniController(string fileName, ResourceCacheType cacheType)
 	{
 		return LoadObject<RuntimeAnimatorController> (fileName, cacheType);
@@ -494,73 +539,92 @@ public class ResourcesLoader: IResourceLoader
 		return LoadObjectAsync<ScriptableObject> (fileName, cacheType, onProcess);
 	}
 
-	public override Sprite[] LoadSprites(string fileName, ResourceCacheType cacheType) {
-		if (string.IsNullOrEmpty(fileName))
-			return null;
+		public override Sprite[] LoadSprites(string fileName, ResourceCacheType cacheType) {
+			if (string.IsNullOrEmpty(fileName))
+				return null;
 
-		Texture tex = LoadObject<Texture>(fileName, ResourceCacheType.rctTemp);
-		if (tex == null)
-			return null;
-		AssetCache cache = AssetCacheManager.Instance.FindOrgObjCache(tex);
-		if (cache == null)
-			return null;
+			Texture tex = LoadObject<Texture>(fileName, ResourceCacheType.rctTemp);
+			if (tex == null)
+				return null;
+			AssetCache cache = AssetCacheManager.Instance.FindOrgObjCache(tex);
+			if (cache == null)
+				return null;
 
-		if (!IsResLoaderFileName(ref fileName))
-			return null;
-		Sprite[] ret = Resources.LoadAll<Sprite>(fileName);
-		if (ret == null || ret.Length <= 0)
-			return null;
+            ResourceAssetCache resCache = cache as ResourceAssetCache;
+            if (resCache == null)
+				return null;
 
-		AddRefSprites(cache, ret, cacheType);
+            Sprite[] ret = resCache.Sprites;
+            if (ret == null)
+			{
+				if (!IsResLoaderFileName(ref fileName))
+					return null;
+                ret = Resources.LoadAll<Sprite>(fileName);
+			}
+            if (ret == null || ret.Length <= 0)
+				return null;
 
-		return ret;
-	}
+			AddRefSprites(resCache, ret, cacheType);
 
-	public override bool LoadSpritesAsync(string fileName, ResourceCacheType cacheType, Action<float, bool, UnityEngine.Object[]> onProcess) {
-		return LoadObjectAsync<Texture>(fileName, ResourceCacheType.rctRefAdd,
-			delegate(float process, bool isDone, Texture obj) {
-				if (isDone) {
-					if (obj == null) {
+			return ret;
+		}
+
+		public override bool LoadSpritesAsync(string fileName, ResourceCacheType cacheType, Action<float, bool, UnityEngine.Object[]> onProcess) {
+			return LoadObjectAsync<Texture>(fileName, ResourceCacheType.rctRefAdd,
+				delegate(float process, bool isDone, Texture obj) {
+					if (isDone) {
+						if (obj == null) {
+							if (onProcess != null)
+								onProcess(process, isDone, null);
+							return;
+						}
+
+						AssetCache cache = AssetCacheManager.Instance.FindOrgObjCache(obj);
+						if (cache == null) {
+							if (onProcess != null)
+								onProcess(process, isDone, null);
+							return;
+						}
+
+						ResourceMgr.Instance.DestroyObject(obj);
+
+                        ResourceAssetCache resCache = cache as ResourceAssetCache;
+                        if (resCache == null)
+                        {
+                            if (onProcess != null)
+                                onProcess(process, isDone, null);
+                            return;
+						}
+
+                        Sprite[] ret = resCache.Sprites;
+                        if (ret == null)
+						{
+							if (!IsResLoaderFileName(ref fileName)) {
+								if (onProcess != null)
+									onProcess(process, isDone, null);
+								return;
+							}
+                            ret = Resources.LoadAll<Sprite>(fileName);
+						}
+                        if (ret == null || ret.Length <= 0) {
+							if (onProcess != null)
+								onProcess(process, isDone, null);
+							return;
+						}
+
+						AddRefSprites(resCache, ret, cacheType);
+
 						if (onProcess != null)
-							onProcess(process, isDone, null);
+							onProcess(process, isDone, ret);
+
 						return;
 					}
-
-					AssetCache cache = AssetCacheManager.Instance.FindOrgObjCache(obj);
-					if (cache == null) {
-						if (onProcess != null)
-							onProcess(process, isDone, null);
-						return;
-					}
-
-					ResourceMgr.Instance.DestroyObject(obj);
-
-					if (!IsResLoaderFileName(ref fileName)) {
-						if (onProcess != null)
-							onProcess(process, isDone, null);
-						return;
-					}
-
-					Sprite[] ret = Resources.LoadAll<Sprite>(fileName);
-					if (ret == null || ret.Length <= 0) {
-						if (onProcess != null)
-							onProcess(process, isDone, null);
-						return;
-					}
-
-					AddRefSprites(cache, ret, cacheType);
 
 					if (onProcess != null)
-						onProcess(process, isDone, ret);
-
-					return;
+						onProcess(process, isDone, null);
 				}
-
-				if (onProcess != null)
-					onProcess(process, isDone, null);
-			}
-		);
-	}
+			);
+		}
 
 #if UNITY_5
 	public override ShaderVariantCollection LoadShaderVarCollection(string fileName, 

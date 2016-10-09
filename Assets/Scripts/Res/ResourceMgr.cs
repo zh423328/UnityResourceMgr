@@ -655,6 +655,22 @@ public class ResourceMgr: Singleton<ResourceMgr>
 		return mResLoader.LoadShaderAsync(fileName, cacheType, onProcess);
 	}
 
+	public Font LoadFont(string fileName, ResourceCacheType cacheType)
+	{
+		Font ret = mAssetLoader.LoadFont (fileName, cacheType);
+		if (ret != null)
+			return ret;
+		return mResLoader.LoadFont (fileName, cacheType);
+	}
+
+	public bool LoadFontAsync(string fileName, Action<float, bool, Font> onProcess, ResourceCacheType cacheType)
+	{
+		bool ret = mAssetLoader.LoadFontAsync (fileName, cacheType, onProcess);
+		if (ret)
+			return ret;
+		return mResLoader.LoadFontAsync (fileName, cacheType, onProcess);
+	}
+
 	public bool PreLoadAndBuildAssetBundleShaders(string abFileName, Action onEnd = null)
 	{
 
@@ -750,10 +766,14 @@ public class ResourceMgr: Singleton<ResourceMgr>
 
 #endif
 
+	private AsyncOperation m_UnUsedOpr = null;
+
 	public void UnloadUnUsed()
 	{
 		// 清除�?有未使用�?		AssetCacheManager.Instance.ClearUnUsed ();
-		Resources.UnloadUnusedAssets ();
+		
+		if (m_UnUsedOpr == null || m_UnUsedOpr.isDone)
+			m_UnUsedOpr = Resources.UnloadUnusedAssets ();
 	}
 
 	public IResourceLoader AssetLoader

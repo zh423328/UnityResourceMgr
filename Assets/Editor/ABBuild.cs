@@ -1946,30 +1946,30 @@ class AssetBundleMgr
 	public string GetUnityEditorPath()
 	{
 #if UNITY_EDITOR_WIN
-		string pathList = System.Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine);
-		if (string.IsNullOrEmpty(pathList))
-			return string.Empty;
+			string pathList = System.Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine);
+			if (string.IsNullOrEmpty(pathList))
+				return string.Empty;
 
-		char[] split = new char[1];
-		split[0] = ';';
-		string[] paths = pathList.Split(split, StringSplitOptions.RemoveEmptyEntries);
-		if (paths == null || paths.Length <= 0)
-			return string.Empty;
-		for (int i = 0; i < paths.Length; ++i)
-		{
-			string p = paths[i];
-			if (string.IsNullOrEmpty(p))
-				continue;
-			p = p.Replace('\\', '/');
-			int idx = p.IndexOf("/Unity", StringComparison.CurrentCultureIgnoreCase);
-			int idx1 = p.IndexOf("/Editor", StringComparison.CurrentCultureIgnoreCase);
-			if (idx >= 0 && idx1 > idx)
-			{
+			char[] split = new char[1];
+			split[0] = ';';
+			string[] paths = pathList.Split(split, StringSplitOptions.RemoveEmptyEntries);
+			if (paths == null || paths.Length <= 0)
+				return string.Empty;
+			for (int i = 0; i < paths.Length; ++i) {
+				string p = paths[i];
+				if (string.IsNullOrEmpty(p))
+					continue;
+				int unityIdx = p.IndexOf("Unity", StringComparison.CurrentCultureIgnoreCase);
+				if (unityIdx < 0)
+					continue;
+				p = p.Replace('\\', '/');
+				int editorIdx = p.IndexOf("/Editor", StringComparison.CurrentCultureIgnoreCase);
+				if (editorIdx < 0 || editorIdx <= unityIdx)
+					continue;
 				return p;
 			}
-		}
 #endif
-		return string.Empty;
+			return string.Empty;
 	}
 
 	public bool BuildCSharpProject(string ProjFileName, string buildExe)
@@ -2115,7 +2115,7 @@ class AssetBundleMgr
 						string value = AssetBunbleInfo.Md5(files[i], false) + ext;
 
 						bool isFirstDown = false;
-						if (isFirstDown != null && i < isFirstDowns.Length)
+						if (isFirstDowns != null && i < isFirstDowns.Length)
 							isFirstDown = isFirstDowns[i]; 
 
 						if (!resFile.AddFile(f, value, isFirstDown))
@@ -2536,6 +2536,7 @@ public static class AssetBundleBuild
 													 ".txt", ".bytes", ".xml", ".csv", ".json",
 													 ".controller", ".shader", ".anim", ".unity", ".mat",
 													 ".wav", ".mp3", ".ogg",
+													 ".ttf",
 													 ".shadervariants", ".asset"};
 	
 	private static readonly string[] ResourceXmlExts = {".prefab", ".fbx",
@@ -2543,6 +2544,7 @@ public static class AssetBundleBuild
 														".bytes", ".bytes", ".bytes", ".bytes", ".bytes",
 														".controller", ".shader", ".anim", ".unity", ".mat",
 														".audio", ".audio", ".audio",
+													    ".ttf",
 														".shaderVar", ".asset"};
 
 	private static readonly Type[] ResourceExtTypes = {
@@ -2551,6 +2553,7 @@ public static class AssetBundleBuild
 														typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset), typeof(UnityEngine.TextAsset),
 														typeof(UnityEngine.Object), typeof(UnityEngine.Shader), typeof(UnityEngine.AnimationClip), null, typeof(UnityEngine.Material),
 														typeof(UnityEngine.AudioClip), typeof(UnityEngine.AudioClip), typeof(UnityEngine.AudioClip),
+														typeof(UnityEngine.Font),
 														typeof(UnityEngine.ShaderVariantCollection), typeof(UnityEngine.ScriptableObject)
 	};
 
